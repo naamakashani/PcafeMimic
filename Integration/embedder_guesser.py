@@ -18,10 +18,6 @@ parser.add_argument("--directory",
                     type=str,
                     default=r'C:\Users\kashann\PycharmProjects\PCAFE-MIMIC\Integration',
                     help="Directory for saved models")
-parser.add_argument("--batch_size",
-                    type=int,
-                    default=64,
-                    help="Mini-batch size")
 parser.add_argument("--num_epochs",
                     type=int,
                     default=1000,
@@ -42,11 +38,31 @@ parser.add_argument("--weight_decay",
                     type=float,
                     default=0.001,
                     help="l_2 weight penalty")
+# change these parameters
 parser.add_argument("--val_trials_wo_im",
                     type=int,
-                    default=50,
+                    default=100,
                     help="Number of validation trials without improvement")
-
+parser.add_argument("--fraction_mask",
+                    type=int,
+                    default=0.01,
+                    help="Number of validation trials without improvemedent")
+parser.add_argument("--run_validation",
+                    type=int,
+                    default=15,
+                    help="Number of validation trials without improvement")
+parser.add_argument("--batch_size",
+                    type=int,
+                    default=128,
+                    help="Number of validation trials without improvement")
+parser.add_argument("--text_embed_dim",
+                    type=int,
+                    default=768,
+                    help="Number of validation trials without improvement")
+parser.add_argument("--reduced_dim",
+                    type=int,
+                    default=20,
+                    help="Number of validation trials without improvement")
 FLAGS = parser.parse_args(args=[])
 
 
@@ -71,8 +87,8 @@ class ImageEmbedder(nn.Module):
         x = self.pool(F.relu(self.conv2(x)))  # Second conv + pooling
         x = x.view(-1, 64 * 7 * 7)  # Flatten the output from (batch_size, 64, 7, 7) to (batch_size, 64*7*7)
         x = F.relu(self.fc1(x))  # Embedding output (128 features)
-        #embedd to 30 features
-        x= F.relu(self.fc2(x))
+        # embedd to 30 features
+        x = F.relu(self.fc2(x))
         return x
 
 
@@ -96,6 +112,7 @@ def map_multiple_features_for_logistic_mimic(sample):
         index_map[i] = list(range(i * 42, i * 42 + 42))
     return index_map
 
+
 def map_multiple_features(sample):
     index_map = {}
     for i in range(0, sample.shape[0]):
@@ -104,8 +121,7 @@ def map_multiple_features(sample):
 
 
 class MultimodalGuesser(nn.Module):
-    def __init__(self, hidden_dim1=FLAGS.hidden_dim1, hidden_dim2=FLAGS.hidden_dim2,
-                 num_classes=2, text_embed_dim=768, img_embed_dim=128, text_reduced_dim=20):
+    def __init__(self):
         super(MultimodalGuesser, self).__init__()
         # self.X needs to be balanced DF, tests_number needs to be the number of tests that reveales the features self.y is the labels numpy array
         self.X, self.y, self.tests_number = utils.load_diabetes()
@@ -113,62 +129,59 @@ class MultimodalGuesser(nn.Module):
         self.tokenizer_summarize_text_model = BartTokenizer.from_pretrained("facebook/bart-large-cnn")
         self.text_model = AutoModel.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
         self.tokenizer = AutoTokenizer.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
-
         self.img_embedder = ImageEmbedder()
-        self.text_reducer = nn.Linear(text_embed_dim, text_reduced_dim)
+        self.text_reducer = nn.Linear(FLAGS.text_embed_dim, FLAGS.reduced_dim)
 
-        self.text_reduced_dim = text_reduced_dim
+        self.text_reduced_dim = FLAGS.reduced_dim
         self.num_classes = len(np.unique(self.y))
         # check how many numeric features we have in the dataset
         numeric_features = []
         for i in range(self.X.shape[1]):
             if isinstance(self.X.iloc[0, i], (int, float)) and not np.isnan(self.X.iloc[0, i]):
                 numeric_features.append(i)
-        self.features_total = len(numeric_features) + (self.X.shape[1] - len(numeric_features)) * text_reduced_dim
+        self.features_total = len(numeric_features) + (self.X.shape[1] - len(numeric_features)) * self.text_reduced_dim
         # this function map the index of the features to the index of the input
         self.map_feature = map_features_to_indices(self.X.iloc[0])
         # change this function to map the tests to what features they reveal
         self.map_test = map_multiple_features(self.X.iloc[0])
         # self.map_test = map_multiple_features_for_logistic_mimic(self.X.iloc[0])
         self.layer1 = torch.nn.Sequential(
-            torch.nn.Linear(self.features_total, hidden_dim1),
+            torch.nn.Linear(self.features_total, FLAGS.hidden_dim1),
             torch.nn.PReLU(),
         )
 
         self.layer2 = torch.nn.Sequential(
-            torch.nn.Linear(hidden_dim1, hidden_dim1),
+            torch.nn.Linear(FLAGS.hidden_dim1, FLAGS.hidden_dim2),
             torch.nn.PReLU(),
         )
-        self.logits = nn.Linear(hidden_dim1, self.num_classes)
+        self.logits = nn.Linear(FLAGS.hidden_dim2, self.num_classes)
 
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer = torch.optim.Adam(self.parameters(),
                                           weight_decay=FLAGS.weight_decay,
-                                          lr=FLAGS.lr )
+                                          lr=FLAGS.lr)
         self.path_to_save = os.path.join(os.getcwd(), 'model_robust_embedder_guesser')
 
     def summarize_text(self, text):
         # Tokenize the input text
         inputs = self.tokenizer_summarize_text_model(text, return_tensors="pt", max_length=1024, truncation=True)
         # Generate the summary
-        summary_ids = self.summarize_text_model.generate(inputs['input_ids'], max_length=100, min_length=30, length_penalty=1.5, num_beams=5,
-                                    early_stopping=True)
+        summary_ids = self.summarize_text_model.generate(inputs['input_ids'], max_length=100, min_length=30,
+                                                         length_penalty=1.5, num_beams=5,
+                                                         early_stopping=True)
         # Decode the generated summary
         summary = self.tokenizer_summarize_text_model.decode(summary_ids[0], skip_special_tokens=True)
         return summary
 
     def embed_text(self, text):
-        text= self.summarize_text(text)
+        text = self.summarize_text(text)
         tokens = self.tokenizer(str(text), padding=True, truncation=True, return_tensors='pt', max_length=128)
         with torch.no_grad():
             outputs = self.text_model(**tokens)
             embeddings = outputs.last_hidden_state[:, 0, :]  # [CLS] token
         return F.relu(self.text_reducer(embeddings))
-        # reduced_text_embeddings = self.text_pca.fit_transform(embeddings)
-        # reduced_text_embeddings = torch.tensor(reduced_text_embeddings, dtype=torch.float32)
-        # return reduced_text_embeddings
 
-    def summarize_text(self,text, max_length=300, min_length=100, length_penalty=2.0, num_beams=4):
+    def summarize_text(self, text, max_length=300, min_length=100, length_penalty=2.0, num_beams=4):
         """
         Summarizes a long text using BART.
 
@@ -182,7 +195,8 @@ class MultimodalGuesser(nn.Module):
         Returns:
             str: The summarized text.
         """
-        inputs = self.tokenizer_summarize_text_model.encode("summarize: " + text, return_tensors="pt", max_length=1024, truncation=True)
+        inputs = self.tokenizer_summarize_text_model.encode("summarize: " + text, return_tensors="pt", max_length=1024,
+                                                            truncation=True)
         summary_ids = self.summarize_text_model.generate(
             inputs,
             max_length=max_length,
@@ -206,14 +220,11 @@ class MultimodalGuesser(nn.Module):
         """
         text = self.summarize_text(text)
         inputs = self.tokenizer(text, return_tensors="pt", max_length=512, truncation=True,
-                                        padding="max_length")
+                                padding="max_length")
         outputs = self.text_model(**inputs)
         # Use the CLS token representation (first token)
         cls_embedding = outputs.last_hidden_state[:, 0, :]
         return F.relu(self.text_reducer(cls_embedding))
-
-
-
 
     def embed_image(self, image_path):
         # Get image embedding using ImageEmbedder
@@ -221,9 +232,6 @@ class MultimodalGuesser(nn.Module):
         img = self.img_embedder.transform(img).unsqueeze(0)  # Apply transforms and add batch dimension
         embedding = self.img_embedder(img)
         return embedding
-
-        # Reduce dimensionality and apply ReLU activation
-        # return F.relu(self.img_reducer(embedding))
 
     def is_numeric_value(self, value):
         # Check if the value is an integer, a floating-point number, or a tensor of type float or double
@@ -260,7 +268,6 @@ class MultimodalGuesser(nn.Module):
 
             elif self.is_text_value(feature):
                 # Handle text: assume feature is text and process it
-                # feature_embed = self.embed_text(feature)
                 feature_embed = self.embed_text_with_clinicalbert(feature)
             elif pd.isna(feature):
                 feature_embed = torch.tensor([0] * self.text_reduced_dim, dtype=torch.float32).unsqueeze(0)
@@ -272,7 +279,6 @@ class MultimodalGuesser(nn.Module):
 
         x = torch.cat(sample_embeddings, dim=1)
         x = x.squeeze(dim=1)
-
         x = self.layer1(x)
         x = self.layer2(x)
         logits = self.logits(x)
@@ -298,7 +304,7 @@ def mask(input: np.array, model) -> np.array:
         if pd.isna(input[i]):
             masked_input.extend([0] * model.text_reduced_dim)
         else:
-            fraction = 0.1
+            fraction = FLAGS.fraction_mask
             if np.random.rand() < fraction:
                 if model.is_numeric_value(input[i]):
                     masked_input.append(0)
@@ -334,10 +340,10 @@ def create_adverserial_input(sample, label, pretrained_model):
             feature_embed = pretrained_model.embed_image(feature)
         elif pretrained_model.is_text_value(feature):
             # Handle text: assume feature is text and process it
-            # feature_embed = pretrained_model.embed_text(feature)
+
             feature_embed = pretrained_model.embed_text_with_clinicalbert(feature)
         elif pd.isna(feature):
-            feature_embed = torch.tensor([0]*pretrained_model.text_reduced_dim , dtype=torch.float32).unsqueeze(0)
+            feature_embed = torch.tensor([0] * pretrained_model.text_reduced_dim, dtype=torch.float32).unsqueeze(0)
         elif pretrained_model.is_numeric_value(feature):
             # Handle numeric: directly convert to tensor
             feature_embed = torch.tensor([feature], dtype=torch.float32).unsqueeze(0)
@@ -374,6 +380,7 @@ def create_adverserial_input(sample, label, pretrained_model):
             break
     return mask_specific_feature(sample, max_gradients_index, pretrained_model)
 
+
 def plot_running_loss(loss_list):
     import matplotlib.pyplot as plt
     plt.plot(loss_list)
@@ -382,9 +389,9 @@ def plot_running_loss(loss_list):
     plt.title('Running Loss')
     plt.show()
 
+
 def train_model(model,
                 nepochs, X_train, y_train, X_val, y_val):
-
     X_train = X_train.to_numpy()
     X_val = X_val.to_numpy()
     val_trials_without_improvement = 0
@@ -394,7 +401,7 @@ def train_model(model,
     num_samples = len(X_train)
     for j in range(1, nepochs):
         running_loss = 0
-        random_indices = np.random.choice(num_samples, size=64, replace=False)  # Choose a random batch of size 64
+        random_indices = np.random.choice(num_samples, size=FLAGS.batch_size, replace=False)
         model.train()  # Set the model to training mode
         model.optimizer.zero_grad()  # Reset gradients before starting the batch
         # Process each sample in the batch
@@ -419,11 +426,10 @@ def train_model(model,
         # Update model parameters after the entire batch
         model.optimizer.step()
 
-
         average_loss = running_loss / len(random_indices)
         loss_list.append(average_loss)
 
-        if j % 10 == 0:
+        if j % FLAGS.run_validation == 0:
             new_best_val_auc = val(model, X_val, y_val, best_val_auc)
             accuracy_list.append(new_best_val_auc)
             if new_best_val_auc > best_val_auc:
@@ -434,6 +440,7 @@ def train_model(model,
             if val_trials_without_improvement == FLAGS.val_trials_wo_im:
                 print('Did not achieve val AUC improvement for {} trials, training is done.'.format(
                     FLAGS.val_trials_wo_im))
+                break
     plot_running_loss(loss_list)
 
 
@@ -492,7 +499,7 @@ def test(X_test, y_test, path_to_save):
         for i in range(len(X_test)):
             input = X_test[i]
             label = y_test[i]
-            #mask only nan values
+            # mask only nan values
             output = model(input)
             _, predicted = torch.max(output.data, 1)
             if predicted == label:
@@ -525,7 +532,6 @@ def main():
                                                         test_size=0.05,
                                                         random_state=42)
 
-
     X_train, X_val, y_train, y_val = train_test_split(X_train,
                                                       y_train,
                                                       test_size=0.1,
@@ -537,11 +543,6 @@ def main():
     test(X_test, y_test, model.path_to_save)
 
 
-
-
-
 if __name__ == "__main__":
     os.chdir(FLAGS.directory)
     main()
-
-

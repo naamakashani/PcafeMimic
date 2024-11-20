@@ -4,7 +4,6 @@ from typing import List, Tuple
 from matplotlib import pyplot as plt
 from env_robust import *
 from agent import *
-from ReplayMemory import *
 from PrioritiziedReplayMemory import *
 from sklearn.metrics import roc_auc_score, average_precision_score
 
@@ -73,6 +72,8 @@ parser.add_argument("--lr_decay_factor",
                     type=float,
                     default=0.1,
                     help="LR decay factor")
+
+#change these parameters
 parser.add_argument("--val_interval",
                     type=int,
                     default=300,
@@ -80,6 +81,10 @@ parser.add_argument("--val_interval",
 parser.add_argument("--val_trials_wo_im",
                     type=int,
                     default=6,
+                    help="Number of validation trials without improvement")
+parser.add_argument("--cost_budget",
+                    type=int,
+                    default=8,
                     help="Number of validation trials without improvement")
 
 FLAGS = parser.parse_args(args=[])
@@ -131,8 +136,7 @@ def calculate_td_error(state, action, reward, next_state, done, agent, gamma):
 
 
 def play_episode(env,
-                 agent: Agent,
-                 replay_memory: ReplayMemory, priorityRM: PrioritizedReplayMemory,
+                 agent: Agent,priorityRM: PrioritizedReplayMemory,
                  eps: float,
                  batch_size: int,
                  train_guesser=True,
@@ -393,52 +397,6 @@ def check_intersecion_union(mask_list):
     print(percentage_selected)
     return union_size, intersection_size
 
-#
-# def show_sample_paths(n_patients, env, agent):
-#     """A method to run episodes on randomly chosen positive and negative test patients, and print trajectories to console  """
-#     print('Loading best networks')
-#     input_dim, output_dim = get_env_dim(env)
-#     env.guesser, agent.dqn = load_networks(i_episode='best', env=env, state_dim=env.guesser.features_total, output_dim=output_dim)
-#     for i in range(n_patients):
-#         print('Starting new episode with a new test patient')
-#         idx = np.random.randint(0, len(env.X_test))
-#         state = env.reset(mode='test',
-#                           patient=idx,
-#                           train_guesser=False)
-#
-#         mask = env.reset_mask()
-#
-#         # run episode
-#         for t in range(int(env.episode_length)):
-#             action = agent.get_action(state, env, eps=0, mask=mask, mode='test')
-#             mask[action] = 0
-#             if action != env.guesser.features_size:
-#                 print('Step: {}, Question: '.format(t + 1), env.guesser.question_names[action], ', Answer: ',
-#                       env.X_test[idx, action])
-#             # take the action
-#             state, reward, done, guess = env.step(action, mask, mode='test')
-#
-#             if guess != -1:
-#                 print('Step: {}, Ready to make a guess: Prob({})={:1.3f}, Guess: y={}, Ground truth: {}'.format(t + 1,
-#                                                                                                                 guess,
-#                                                                                                                 env.probs[
-#                                                                                                                     guess],
-#                                                                                                                 guess,
-#                                                                                                                 env.y_test[
-#                                                                                                                     idx]))
-#
-#                 break
-#
-#         if guess == -1:
-#             state, reward, done, guess = env.step(agent.output_dim - 1, mask, mode='test')
-#             print('Step: {}, Ready to make a guess: Prob({})={:1.3f}, Guess: y={}, Ground truth: {}'.format(t + 1,
-#                                                                                                             guess,
-#                                                                                                             env.probs[
-#                                                                                                                 guess],
-#                                                                                                             guess,
-#                                                                                                             env.y_test[
-#                                                                                                                 idx]))
-
 
 def val(i_episode: int,
         best_val_acc: float, env, agent) -> float:
@@ -522,7 +480,6 @@ def run(cost_budget):
     val_list = []
     # counter of validation trials with no improvement, to determine when to stop training
     val_trials_without_improvement = 0
-    replay_memory = ReplayMemory(FLAGS.capacity)
     priorityRP = PrioritizedReplayMemory(FLAGS.capacity)
     i = 0
     rewards_list = []
@@ -534,7 +491,7 @@ def run(cost_budget):
         # play an episode
         reward, t = play_episode(env,
                                  agent,
-                                 replay_memory, priorityRP,
+                                 priorityRP,
                                  eps,
                                  FLAGS.batch_size,
                                  train_dqn=train_dqn,
@@ -562,13 +519,59 @@ def run(cost_budget):
 
 def main():
     os.chdir(FLAGS.directory)
-    acc, epochs, intersect, union, steps = run(17)
-    for i in range(10,17):
-        cost_budget= i
-        acc, epochs, intersect, union, steps = run(cost_budget)
-        print('acc:', acc, 'epochs:', epochs, 'intersect:', intersect, 'union:', union, 'steps:', steps)
+    acc, epochs, intersect, union, steps = run(FLAGS.cost_budget)
 
 
+
+
+
+
+
+#
+# def show_sample_paths(n_patients, env, agent):
+#     """A method to run episodes on randomly chosen positive and negative test patients, and print trajectories to console  """
+#     print('Loading best networks')
+#     input_dim, output_dim = get_env_dim(env)
+#     env.guesser, agent.dqn = load_networks(i_episode='best', env=env, state_dim=env.guesser.features_total, output_dim=output_dim)
+#     for i in range(n_patients):
+#         print('Starting new episode with a new test patient')
+#         idx = np.random.randint(0, len(env.X_test))
+#         state = env.reset(mode='test',
+#                           patient=idx,
+#                           train_guesser=False)
+#
+#         mask = env.reset_mask()
+#
+#         # run episode
+#         for t in range(int(env.episode_length)):
+#             action = agent.get_action(state, env, eps=0, mask=mask, mode='test')
+#             mask[action] = 0
+#             if action != env.guesser.features_size:
+#                 print('Step: {}, Question: '.format(t + 1), env.guesser.question_names[action], ', Answer: ',
+#                       env.X_test[idx, action])
+#             # take the action
+#             state, reward, done, guess = env.step(action, mask, mode='test')
+#
+#             if guess != -1:
+#                 print('Step: {}, Ready to make a guess: Prob({})={:1.3f}, Guess: y={}, Ground truth: {}'.format(t + 1,
+#                                                                                                                 guess,
+#                                                                                                                 env.probs[
+#                                                                                                                     guess],
+#                                                                                                                 guess,
+#                                                                                                                 env.y_test[
+#                                                                                                                     idx]))
+#
+#                 break
+#
+#         if guess == -1:
+#             state, reward, done, guess = env.step(agent.output_dim - 1, mask, mode='test')
+#             print('Step: {}, Ready to make a guess: Prob({})={:1.3f}, Guess: y={}, Ground truth: {}'.format(t + 1,
+#                                                                                                             guess,
+#                                                                                                             env.probs[
+#                                                                                                                 guess],
+#                                                                                                             guess,
+#                                                                                                             env.y_test[
+#                                                                                                                 idx]))
 
 
 

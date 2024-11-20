@@ -598,7 +598,7 @@ def load_diabetes():
     data, labels = balance_class(np.array(data), np.array(labels))
     X = pd.DataFrame(data)
 
-    return X, labels, 3
+    return X, labels, len(X.columns)
 
 
 def create_demo():

@@ -107,8 +107,7 @@ def load_mimic_time_series():
     return X, Y, 17
 
 
-def load_mimic_text():
-    path = r'C:\Users\kashann\PycharmProjects\mimic-code-extract\mimic-iii\notebooks\ipynb_example\data_with_text.json'
+def load_mimic_text(path):
     df = pd.read_json(path, lines=True)
     df = df.drop(columns=['subject_id', 'hadm_id', 'icustay_id'])
     # define the label mortality_inhospital as Y and drop from df
@@ -552,10 +551,9 @@ def load_gisetta():
     return X, y, y, len(sample)
 
 
-def load_diabetes():
+def load_diabetes(file_path_clean):
     data = []
     labels = []
-    file_path_clean = r'C:\Users\kashann\PycharmProjects\PCAFE\RL\DATA\diabetes_clean.csv'
     # Open the CSV file
     with open(file_path_clean, newline='') as csvfile:
         # Create a CSV reader

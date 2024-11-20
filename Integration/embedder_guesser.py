@@ -18,9 +18,17 @@ parser.add_argument("--directory",
                     type=str,
                     default=r'C:\Users\kashann\PycharmProjects\PCAFE-MIMIC\Integration',
                     help="Directory for saved models")
+parser.add_argument("--diabetes_directory",
+                    type=str,
+                    default=r'C:\Users\kashann\PycharmProjects\PCAFE\RL\DATA\diabetes_clean.csv',
+                    help="Directory for saved models")
+parser.add_argument("--mimic_directory",
+                    type=str,
+                    default=r'C:\Users\kashann\PycharmProjects\mimic-code-extract\mimic-iii\notebooks\ipynb_example\data_with_text.json',
+                    help="Directory for saved models")
 parser.add_argument("--num_epochs",
                     type=int,
-                    default=1000,
+                    default=5000,
                     help="number of epochs")
 parser.add_argument("--hidden-dim1",
                     type=int,
@@ -41,28 +49,28 @@ parser.add_argument("--weight_decay",
 # change these parameters
 parser.add_argument("--val_trials_wo_im",
                     type=int,
-                    default=100,
+                    default=50,
                     help="Number of validation trials without improvement")
 parser.add_argument("--fraction_mask",
                     type=int,
                     default=0.01,
-                    help="Number of validation trials without improvemedent")
+                    help="fraction mask")
 parser.add_argument("--run_validation",
                     type=int,
-                    default=15,
-                    help="Number of validation trials without improvement")
+                    default=20,
+                    help="after how many epochs to run validation")
 parser.add_argument("--batch_size",
                     type=int,
                     default=128,
-                    help="Number of validation trials without improvement")
+                    help="bach size")
 parser.add_argument("--text_embed_dim",
                     type=int,
                     default=768,
-                    help="Number of validation trials without improvement")
+                    help="Text embedding dimension")
 parser.add_argument("--reduced_dim",
                     type=int,
                     default=20,
-                    help="Number of validation trials without improvement")
+                    help="Reduced dimension for text embedding")
 FLAGS = parser.parse_args(args=[])
 
 
@@ -124,7 +132,8 @@ class MultimodalGuesser(nn.Module):
     def __init__(self):
         super(MultimodalGuesser, self).__init__()
         # self.X needs to be balanced DF, tests_number needs to be the number of tests that reveales the features self.y is the labels numpy array
-        self.X, self.y, self.tests_number = utils.load_diabetes()
+        self.X, self.y, self.tests_number = utils.load_diabetes(FLAGS.diabetes_directory)
+        # self.X, self.y, self.tests_number = utils.load_mimic_text(FLAGS.mimic_directory)
         self.summarize_text_model = BartForConditionalGeneration.from_pretrained("facebook/bart-large-cnn")
         self.tokenizer_summarize_text_model = BartTokenizer.from_pretrained("facebook/bart-large-cnn")
         self.text_model = AutoModel.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
@@ -154,6 +163,11 @@ class MultimodalGuesser(nn.Module):
             torch.nn.Linear(FLAGS.hidden_dim1, FLAGS.hidden_dim2),
             torch.nn.PReLU(),
         )
+        self.layer3 = torch.nn.Sequential(
+            torch.nn.Linear(FLAGS.hidden_dim2, FLAGS.hidden_dim2),
+            torch.nn.PReLU(),
+        )
+
         self.logits = nn.Linear(FLAGS.hidden_dim2, self.num_classes)
 
         self.criterion = nn.CrossEntropyLoss()
@@ -281,6 +295,7 @@ class MultimodalGuesser(nn.Module):
         x = x.squeeze(dim=1)
         x = self.layer1(x)
         x = self.layer2(x)
+        x = self.layer3(x)
         logits = self.logits(x)
 
         if logits.dim() == 2:

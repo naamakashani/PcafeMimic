@@ -22,6 +22,10 @@ parser.add_argument("--diabetes_directory",
                     type=str,
                     default=r'C:\Users\kashann\PycharmProjects\PCAFE\RL\DATA\diabetes_clean.csv',
                     help="Directory for saved models")
+parser.add_argument("--mimic_no_text",
+                    type=str,
+                    path= r'C:\Users\kashann\PycharmProjects\mimic-code-extract\mimic-iii\notebooks\ipynb_example\data_numeric.json',
+                    help="mimic data without text")
 parser.add_argument("--mimic_directory",
                     type=str,
                     default=r'C:\Users\kashann\PycharmProjects\mimic-code-extract\mimic-iii\notebooks\ipynb_example\data_with_text.json',
@@ -49,11 +53,11 @@ parser.add_argument("--weight_decay",
 # change these parameters
 parser.add_argument("--val_trials_wo_im",
                     type=int,
-                    default=50,
+                    default=5,
                     help="Number of validation trials without improvement")
 parser.add_argument("--fraction_mask",
                     type=int,
-                    default=0.01,
+                    default=0.1,
                     help="fraction mask")
 parser.add_argument("--run_validation",
                     type=int,
@@ -61,7 +65,7 @@ parser.add_argument("--run_validation",
                     help="after how many epochs to run validation")
 parser.add_argument("--batch_size",
                     type=int,
-                    default=128,
+                    default=64,
                     help="bach size")
 parser.add_argument("--text_embed_dim",
                     type=int,
@@ -132,15 +136,15 @@ class MultimodalGuesser(nn.Module):
     def __init__(self):
         super(MultimodalGuesser, self).__init__()
         # self.X needs to be balanced DF, tests_number needs to be the number of tests that reveales the features self.y is the labels numpy array
-        self.X, self.y, self.tests_number = utils.load_diabetes(FLAGS.diabetes_directory)
+        # self.X, self.y, self.tests_number = utils.load_diabetes(FLAGS.diabetes_directory)
         # self.X, self.y, self.tests_number = utils.load_mimic_text(FLAGS.mimic_directory)
+        self.X, self.y, self.tests_number = utils.load_mimic_no_text(FLAGS.mimic_no_text)
         self.summarize_text_model = BartForConditionalGeneration.from_pretrained("facebook/bart-large-cnn")
         self.tokenizer_summarize_text_model = BartTokenizer.from_pretrained("facebook/bart-large-cnn")
         self.text_model = AutoModel.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
         self.tokenizer = AutoTokenizer.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
         self.img_embedder = ImageEmbedder()
         self.text_reducer = nn.Linear(FLAGS.text_embed_dim, FLAGS.reduced_dim)
-
         self.text_reduced_dim = FLAGS.reduced_dim
         self.num_classes = len(np.unique(self.y))
         # check how many numeric features we have in the dataset
@@ -238,6 +242,7 @@ class MultimodalGuesser(nn.Module):
         outputs = self.text_model(**inputs)
         # Use the CLS token representation (first token)
         cls_embedding = outputs.last_hidden_state[:, 0, :]
+        #check this line
         return F.relu(self.text_reducer(cls_embedding))
 
     def embed_image(self, image_path):
@@ -353,6 +358,7 @@ def create_adverserial_input(sample, label, pretrained_model):
         if pretrained_model.is_image_value(feature):
             # Handle image path: assume feature is a path and process it
             feature_embed = pretrained_model.embed_image(feature)
+            feature_embed = pretrained_model.embed_image(feature)
         elif pretrained_model.is_text_value(feature):
             # Handle text: assume feature is text and process it
 
@@ -425,6 +431,7 @@ def train_model(model,
             label = torch.tensor([y_train[i]], dtype=torch.long)  # Convert label to tensor
 
             # Apply adversarial input or masking as needed
+            # try diffrent approaches
             if 300 < j < 350:
                 new_input = create_adverserial_input(input, label, model)
             else:

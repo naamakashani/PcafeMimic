@@ -157,6 +157,7 @@ def play_episode(env,
     mask = env.reset_mask()
     t = 0
     sum_cost = 0
+    #change this condition
     while not done and sum_cost < env.cost_budget:
         # while not done and t < env.episode_length:
         a = agent.get_action(s, env, eps, mask, mode)

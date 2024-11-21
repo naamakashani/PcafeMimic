@@ -118,8 +118,8 @@ def load_mimic_text(path):
     X = pd.DataFrame(X)
     return X, Y, len(X.columns)
 
-def load_mimic_no_text():
-    path = r'C:\Users\kashann\PycharmProjects\mimic-code-extract\mimic-iii\notebooks\ipynb_example\data_numeric.json'
+def load_mimic_no_text(path):
+
     df = pd.read_json(path, lines=True)
     df = df.drop(columns=['subject_id', 'hadm_id', 'icustay_id'])
     # define the label mortality_inhospital as Y and drop from df

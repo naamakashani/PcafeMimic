@@ -1,4 +1,5 @@
 import os
+import random
 import torch.nn.functional as F
 import torch
 import torch.nn as nn
@@ -24,7 +25,7 @@ parser.add_argument("--diabetes_directory",
                     help="Directory for saved models")
 parser.add_argument("--mimic_no_text",
                     type=str,
-                    path= r'C:\Users\kashann\PycharmProjects\mimic-code-extract\mimic-iii\notebooks\ipynb_example\data_numeric.json',
+                    default= r'C:\Users\kashann\PycharmProjects\mimic-code-extract\mimic-iii\notebooks\ipynb_example\data_numeric.json',
                     help="mimic data without text")
 parser.add_argument("--mimic_directory",
                     type=str,
@@ -53,7 +54,7 @@ parser.add_argument("--weight_decay",
 # change these parameters
 parser.add_argument("--val_trials_wo_im",
                     type=int,
-                    default=5,
+                    default=20,
                     help="Number of validation trials without improvement")
 parser.add_argument("--fraction_mask",
                     type=int,
@@ -61,7 +62,7 @@ parser.add_argument("--fraction_mask",
                     help="fraction mask")
 parser.add_argument("--run_validation",
                     type=int,
-                    default=20,
+                    default=300,
                     help="after how many epochs to run validation")
 parser.add_argument("--batch_size",
                     type=int,
@@ -179,25 +180,6 @@ class MultimodalGuesser(nn.Module):
                                           weight_decay=FLAGS.weight_decay,
                                           lr=FLAGS.lr)
         self.path_to_save = os.path.join(os.getcwd(), 'model_robust_embedder_guesser')
-
-    def summarize_text(self, text):
-        # Tokenize the input text
-        inputs = self.tokenizer_summarize_text_model(text, return_tensors="pt", max_length=1024, truncation=True)
-        # Generate the summary
-        summary_ids = self.summarize_text_model.generate(inputs['input_ids'], max_length=100, min_length=30,
-                                                         length_penalty=1.5, num_beams=5,
-                                                         early_stopping=True)
-        # Decode the generated summary
-        summary = self.tokenizer_summarize_text_model.decode(summary_ids[0], skip_special_tokens=True)
-        return summary
-
-    def embed_text(self, text):
-        text = self.summarize_text(text)
-        tokens = self.tokenizer(str(text), padding=True, truncation=True, return_tensors='pt', max_length=128)
-        with torch.no_grad():
-            outputs = self.text_model(**tokens)
-            embeddings = outputs.last_hidden_state[:, 0, :]  # [CLS] token
-        return F.relu(self.text_reducer(embeddings))
 
     def summarize_text(self, text, max_length=300, min_length=100, length_penalty=2.0, num_beams=4):
         """
@@ -405,12 +387,14 @@ def create_adverserial_input(sample, label, pretrained_model):
 def plot_running_loss(loss_list):
     import matplotlib.pyplot as plt
     plt.plot(loss_list)
-    plt.xlabel('Batch')
+    plt.xlabel('Iteration')
     plt.ylabel('Loss')
     plt.title('Running Loss')
     plt.show()
 
-
+def compute_probabilities(j, total_episodes):
+    prob_mask = 0.8 + 0.2 * (1 - j / total_episodes)  # Starts at 1, decreases to 0.8
+    return prob_mask
 def train_model(model,
                 nepochs, X_train, y_train, X_val, y_val):
     X_train = X_train.to_numpy()
@@ -429,13 +413,13 @@ def train_model(model,
         for i in random_indices:
             input = X_train[i]
             label = torch.tensor([y_train[i]], dtype=torch.long)  # Convert label to tensor
+            prob_mask= compute_probabilities(j, nepochs)
 
-            # Apply adversarial input or masking as needed
-            # try diffrent approaches
-            if 300 < j < 350:
-                new_input = create_adverserial_input(input, label, model)
-            else:
+            # Decide the action based on the computed probabilities
+            if random.random() < prob_mask:
                 new_input = mask(input, model)
+            else:
+                new_input = create_adverserial_input(input, label, model)
 
             # Forward pass
             output = model(new_input)

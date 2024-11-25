@@ -7,7 +7,6 @@ class myEnv(gymnasium.Env):
     def __init__(self,
                  flags,
                  device, cost_budget,
-                 oversample=True,
                  load_pretrained_guesser=True):
         self.guesser = MultimodalGuesser()
         self.device = device

@@ -157,9 +157,7 @@ def play_episode(env,
     mask = env.reset_mask()
     t = 0
     sum_cost = 0
-    #change this condition
     while not done and sum_cost < env.cost_budget:
-        # while not done and t < env.episode_length:
         a = agent.get_action(s, env, eps, mask, mode)
         if sum_cost+env.cost_list[a] > env.cost_budget:
             a = agent.output_dim - 1
@@ -182,6 +180,9 @@ def play_episode(env,
 
         t += 1
         sum_cost += env.cost_list[a]
+
+        if np.sum(mask) == 0:
+            done = True
     return total_reward, t
 
 
@@ -348,6 +349,8 @@ def test(env, agent, state_dim, output_dim):
 
             t += 1
             sum_cost += env.cost_list[action]
+            if np.sum(mask) == 0:
+                done = True
 
         if guess == -1:
             a = agent.output_dim - 1
@@ -421,14 +424,12 @@ def val(i_episode: int,
             # select action from policy
             if t == 0:
                 action = agent.get_action_not_guess(state, env, eps=0, mask=mask, mode='val')
-
             else:
                 action = agent.get_action(state, env, eps=0, mask=mask, mode='val')
             if sum_cost + env.cost_list[action] > env.cost_budget:
                 action = agent.output_dim - 1
 
             mask[action] = 0
-
             # take the action
             state, reward, done, guess = env.step(action, mask, mode='val')
             if guess != -1:
@@ -436,6 +437,8 @@ def val(i_episode: int,
                 y_hat_probs[i] = env.prob_classes
             t += 1
             sum_cost += env.cost_list[action]
+            if np.sum(mask) == 0:
+                done = True
 
         if guess == -1:
             a = agent.output_dim - 1

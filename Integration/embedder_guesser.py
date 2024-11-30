@@ -54,7 +54,7 @@ parser.add_argument("--weight_decay",
 # change these parameters
 parser.add_argument("--val_trials_wo_im",
                     type=int,
-                    default=30,
+                    default=10,
                     help="Number of validation trials without improvement")
 parser.add_argument("--fraction_mask",
                     type=int,
@@ -140,8 +140,8 @@ class MultimodalGuesser(nn.Module):
         # self.X needs to be balanced DF, tests_number needs to be the number of tests that reveales the features self.y is the labels numpy array
         # self.X, self.y, self.tests_number = utils.load_diabetes(FLAGS.diabetes_directory)
         # self.X, self.y, self.tests_number = utils.load_mimic_text(FLAGS.mimic_directory)
-        self.X, self.y, self.tests_number = utils.load_mimic_time_series()
-        #self.X, self.y, self.tests_number = utils.load_mimic_no_text(FLAGS.mimic_no_text)
+        # self.X, self.y, self.tests_number = utils.load_mimic_time_series()
+        self.X, self.y, self.tests_number = utils.load_mimic_no_text(FLAGS.mimic_no_text)
         self.summarize_text_model = BartForConditionalGeneration.from_pretrained("facebook/bart-large-cnn").to(self.device)
         self.tokenizer_summarize_text_model = BartTokenizer.from_pretrained("facebook/bart-large-cnn")
         self.text_model = AutoModel.from_pretrained("emilyalsentzer/Bio_ClinicalBERT").to(self.device)

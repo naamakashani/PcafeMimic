@@ -33,7 +33,7 @@ parser.add_argument("--mimic_directory",
                     help="Directory for saved models")
 parser.add_argument("--num_epochs",
                     type=int,
-                    default=5000,
+                    default=10000,
                     help="number of epochs")
 parser.add_argument("--hidden-dim1",
                     type=int,
@@ -54,7 +54,7 @@ parser.add_argument("--weight_decay",
 # change these parameters
 parser.add_argument("--val_trials_wo_im",
                     type=int,
-                    default=20,
+                    default=30,
                     help="Number of validation trials without improvement")
 parser.add_argument("--fraction_mask",
                     type=int,
@@ -62,11 +62,11 @@ parser.add_argument("--fraction_mask",
                     help="fraction mask")
 parser.add_argument("--run_validation",
                     type=int,
-                    default=300,
+                    default=500,
                     help="after how many epochs to run validation")
 parser.add_argument("--batch_size",
                     type=int,
-                    default=64,
+                    default=128,
                     help="bach size")
 parser.add_argument("--text_embed_dim",
                     type=int,
@@ -132,20 +132,22 @@ def map_multiple_features(sample):
         index_map[i] = [i]
     return index_map
 
-
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 class MultimodalGuesser(nn.Module):
     def __init__(self):
         super(MultimodalGuesser, self).__init__()
+        self.device= DEVICE
         # self.X needs to be balanced DF, tests_number needs to be the number of tests that reveales the features self.y is the labels numpy array
         # self.X, self.y, self.tests_number = utils.load_diabetes(FLAGS.diabetes_directory)
         # self.X, self.y, self.tests_number = utils.load_mimic_text(FLAGS.mimic_directory)
-        self.X, self.y, self.tests_number = utils.load_mimic_no_text(FLAGS.mimic_no_text)
-        self.summarize_text_model = BartForConditionalGeneration.from_pretrained("facebook/bart-large-cnn")
+        self.X, self.y, self.tests_number = utils.load_mimic_time_series()
+        #self.X, self.y, self.tests_number = utils.load_mimic_no_text(FLAGS.mimic_no_text)
+        self.summarize_text_model = BartForConditionalGeneration.from_pretrained("facebook/bart-large-cnn").to(self.device)
         self.tokenizer_summarize_text_model = BartTokenizer.from_pretrained("facebook/bart-large-cnn")
-        self.text_model = AutoModel.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
+        self.text_model = AutoModel.from_pretrained("emilyalsentzer/Bio_ClinicalBERT").to(self.device)
         self.tokenizer = AutoTokenizer.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
         self.img_embedder = ImageEmbedder()
-        self.text_reducer = nn.Linear(FLAGS.text_embed_dim, FLAGS.reduced_dim)
+        self.text_reducer = nn.Linear(FLAGS.text_embed_dim, FLAGS.reduced_dim).to(self.device)
         self.text_reduced_dim = FLAGS.reduced_dim
         self.num_classes = len(np.unique(self.y))
         # check how many numeric features we have in the dataset
@@ -157,8 +159,8 @@ class MultimodalGuesser(nn.Module):
         # this function map the index of the features to the index of the input
         self.map_feature = map_features_to_indices(self.X.iloc[0])
         # change this function to map the tests to what features they reveal
-        self.map_test = map_multiple_features(self.X.iloc[0])
-        # self.map_test = map_multiple_features_for_logistic_mimic(self.X.iloc[0])
+        # self.map_test = map_multiple_features(self.X.iloc[0])
+        self.map_test = map_multiple_features_for_logistic_mimic(self.X.iloc[0])
         self.layer1 = torch.nn.Sequential(
             torch.nn.Linear(self.features_total, FLAGS.hidden_dim1),
             torch.nn.PReLU(),
@@ -180,6 +182,11 @@ class MultimodalGuesser(nn.Module):
                                           weight_decay=FLAGS.weight_decay,
                                           lr=FLAGS.lr)
         self.path_to_save = os.path.join(os.getcwd(), 'model_robust_embedder_guesser')
+        self.layer1 = self.layer1.to(self.device)
+        self.layer2 = self.layer2.to(self.device)
+        self.layer3 = self.layer3.to(self.device)
+        self.logits = self.logits.to(self.device)
+
 
     def summarize_text(self, text, max_length=300, min_length=100, length_penalty=2.0, num_beams=4):
         """
@@ -196,7 +203,7 @@ class MultimodalGuesser(nn.Module):
             str: The summarized text.
         """
         inputs = self.tokenizer_summarize_text_model.encode("summarize: " + text, return_tensors="pt", max_length=1024,
-                                                            truncation=True)
+                                                            truncation=True).to(self.device)
         summary_ids = self.summarize_text_model.generate(
             inputs,
             max_length=max_length,
@@ -220,18 +227,18 @@ class MultimodalGuesser(nn.Module):
         """
         text = self.summarize_text(text)
         inputs = self.tokenizer(text, return_tensors="pt", max_length=512, truncation=True,
-                                padding="max_length")
+                                padding="max_length").to(self.device)
         outputs = self.text_model(**inputs)
         # Use the CLS token representation (first token)
-        cls_embedding = outputs.last_hidden_state[:, 0, :]
+        cls_embedding = outputs.last_hidden_state[:, 0, :].to(self.device)
         #check this line
         return F.relu(self.text_reducer(cls_embedding))
 
     def embed_image(self, image_path):
         # Get image embedding using ImageEmbedder
         img = Image.open(image_path).convert('L')  # Open the image
-        img = self.img_embedder.transform(img).unsqueeze(0)  # Apply transforms and add batch dimension
-        embedding = self.img_embedder(img)
+        img = self.img_embedder.transform(img).unsqueeze(0).to(self.device) # Apply transforms and add batch dimension
+        embedding = self.img_embedder(img).to(self.device)
         return embedding
 
     def is_numeric_value(self, value):
@@ -266,15 +273,14 @@ class MultimodalGuesser(nn.Module):
             if self.is_image_value(feature):
                 # Handle image path: assume feature is a path and process it
                 feature_embed = self.embed_image(feature)
-
             elif self.is_text_value(feature):
                 # Handle text: assume feature is text and process it
                 feature_embed = self.embed_text_with_clinicalbert(feature)
             elif pd.isna(feature):
-                feature_embed = torch.tensor([0] * self.text_reduced_dim, dtype=torch.float32).unsqueeze(0)
+                feature_embed = torch.tensor([0] * self.text_reduced_dim, dtype=torch.float32).unsqueeze(0).to(self.device)
             elif self.is_numeric_value(feature):
                 # Handle numeric: directly convert to tensor
-                feature_embed = torch.tensor([feature], dtype=torch.float32).unsqueeze(0)
+                feature_embed = torch.tensor([feature], dtype=torch.float32).unsqueeze(0).to(self.device)
 
             sample_embeddings.append(feature_embed)
 
@@ -283,7 +289,7 @@ class MultimodalGuesser(nn.Module):
         x = self.layer1(x)
         x = self.layer2(x)
         x = self.layer3(x)
-        logits = self.logits(x)
+        logits = self.logits(x).to(self.device)
 
         if logits.dim() == 2:
             probs = F.softmax(logits, dim=1)
@@ -340,16 +346,14 @@ def create_adverserial_input(sample, label, pretrained_model):
         if pretrained_model.is_image_value(feature):
             # Handle image path: assume feature is a path and process it
             feature_embed = pretrained_model.embed_image(feature)
-            feature_embed = pretrained_model.embed_image(feature)
         elif pretrained_model.is_text_value(feature):
             # Handle text: assume feature is text and process it
-
             feature_embed = pretrained_model.embed_text_with_clinicalbert(feature)
         elif pd.isna(feature):
-            feature_embed = torch.tensor([0] * pretrained_model.text_reduced_dim, dtype=torch.float32).unsqueeze(0)
+            feature_embed = torch.tensor([0] * pretrained_model.text_reduced_dim, dtype=torch.float32).unsqueeze(0).to(pretrained_model.device)
         elif pretrained_model.is_numeric_value(feature):
             # Handle numeric: directly convert to tensor
-            feature_embed = torch.tensor([feature], dtype=torch.float32).unsqueeze(0)
+            feature_embed = torch.tensor([feature], dtype=torch.float32).unsqueeze(0).to(pretrained_model.device)
         sample_embeddings.append(feature_embed)
 
     input = torch.cat(sample_embeddings, dim=1)
@@ -361,7 +365,7 @@ def create_adverserial_input(sample, label, pretrained_model):
     x = pretrained_model.layer1(input)
     x = pretrained_model.layer2(x)
 
-    logits = pretrained_model.logits(x)
+    logits = pretrained_model.logits(x).to(pretrained_model.device)
     if logits.dim() == 2:
         probs = F.softmax(logits, dim=1)
     else:
@@ -395,6 +399,7 @@ def plot_running_loss(loss_list):
 def compute_probabilities(j, total_episodes):
     prob_mask = 0.8 + 0.2 * (1 - j / total_episodes)  # Starts at 1, decreases to 0.8
     return prob_mask
+
 def train_model(model,
                 nepochs, X_train, y_train, X_val, y_val):
     X_train = X_train.to_numpy()
@@ -412,9 +417,8 @@ def train_model(model,
         # Process each sample in the batch
         for i in random_indices:
             input = X_train[i]
-            label = torch.tensor([y_train[i]], dtype=torch.long)  # Convert label to tensor
+            label = torch.tensor([y_train[i]], dtype=torch.long).to(model.device)   # Convert label to tensor
             prob_mask= compute_probabilities(j, nepochs)
-
             # Decide the action based on the computed probabilities
             if random.random() < prob_mask:
                 new_input = mask(input, model)
@@ -476,8 +480,7 @@ def val(model, X_val, y_val, best_val_auc=0):
     with torch.no_grad():
         for i in range(1, num_samples):
             input = X_val[i]
-            label = y_val[i]
-            # input = mask(input, model)
+            label = torch.tensor(y_val[i], dtype=torch.long).to(model.device)
             output = model(input)
             _, predicted = torch.max(output.data, 1)
             if predicted == label:
@@ -490,11 +493,10 @@ def val(model, X_val, y_val, best_val_auc=0):
     return accuracy
 
 
-def test(X_test, y_test, path_to_save):
+def test(model, X_test, y_test):
     X_test = X_test.to_numpy()
     guesser_filename = 'best_guesser.pth'
-    guesser_load_path = os.path.join(path_to_save, guesser_filename)
-    model = MultimodalGuesser()
+    guesser_load_path = os.path.join(model.path_to_save, guesser_filename)
     guesser_state_dict = torch.load(guesser_load_path)
     model.load_state_dict(guesser_state_dict)
     model.eval()
@@ -504,7 +506,7 @@ def test(X_test, y_test, path_to_save):
     with torch.no_grad():
         for i in range(len(X_test)):
             input = X_test[i]
-            label = y_test[i]
+            label = torch.tensor(y_test[i], dtype=torch.long).to(model.device)
             # mask only nan values
             output = model(input)
             _, predicted = torch.max(output.data, 1)
@@ -533,6 +535,7 @@ def main():
     :return:
     '''
     model = MultimodalGuesser()
+    model.to(model.device)
     X_train, X_test, y_train, y_test = train_test_split(model.X,
                                                         model.y,
                                                         test_size=0.05,
@@ -546,7 +549,15 @@ def main():
     train_model(model, FLAGS.num_epochs,
                 X_train, y_train, X_val, y_val)
 
-    test(X_test, y_test, model.path_to_save)
+    test(model, X_test, y_test)
+
+
+
+
+
+
+
+
 
 
 if __name__ == "__main__":

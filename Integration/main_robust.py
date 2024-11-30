@@ -84,7 +84,7 @@ parser.add_argument("--val_trials_wo_im",
                     help="Number of validation trials without improvement")
 parser.add_argument("--cost_budget",
                     type=int,
-                    default=8,
+                    default=17,
                     help="Number of validation trials without improvement")
 
 FLAGS = parser.parse_args(args=[])
@@ -181,7 +181,7 @@ def play_episode(env,
         t += 1
         sum_cost += env.cost_list[a]
 
-        if np.sum(mask) == 0:
+        if torch.sum(mask) == 0:
             done = True
     return total_reward, t
 
@@ -349,7 +349,7 @@ def test(env, agent, state_dim, output_dim):
 
             t += 1
             sum_cost += env.cost_list[action]
-            if np.sum(mask) == 0:
+            if torch.sum(mask) == 0:
                 done = True
 
         if guess == -1:
@@ -437,7 +437,7 @@ def val(i_episode: int,
                 y_hat_probs[i] = env.prob_classes
             t += 1
             sum_cost += env.cost_list[action]
-            if np.sum(mask) == 0:
+            if torch.sum(mask) == 0:
                 done = True
 
         if guess == -1:

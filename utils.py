@@ -1,5 +1,4 @@
 import csv
-import json
 from scipy.io import loadmat
 from sklearn.preprocessing import StandardScaler
 from ucimlrepo import fetch_ucirepo
@@ -8,7 +7,6 @@ from pathlib import Path
 from PIL import Image
 import numpy as np
 import pandas as pd
-from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
 
 def add_noise(X, noise_std=0.01):
@@ -94,16 +92,18 @@ def load_mimiciii():
 
 
 def load_mimic_time_series():
-    X_train = pd.read_csv(r'C:\Users\kashann\PycharmProjects\pythonProject2\train_X.csv')
-    Y_train = pd.read_csv(r'C:\Users\kashann\PycharmProjects\pythonProject2\train_Y.csv')
-    X_val = pd.read_csv(r'C:\Users\kashann\PycharmProjects\pythonProject2\val_X.csv')
-    Y_val = pd.read_csv(r'C:\Users\kashann\PycharmProjects\pythonProject2\val_Y.csv')
-    X_test = pd.read_csv(r'C:\Users\kashann\PycharmProjects\pythonProject2\test_X.csv')
-    Y_test = pd.read_csv(r'C:\Users\kashann\PycharmProjects\pythonProject2\test_Y.csv')
+    X_train = pd.read_csv(r'C:\Users\kashann\PycharmProjects\mimic3-benchmarks\train_X.csv')
+    Y_train = pd.read_csv(r'C:\Users\kashann\PycharmProjects\mimic3-benchmarks\train_Y.csv')
+    X_val = pd.read_csv(r'C:\Users\kashann\PycharmProjects\mimic3-benchmarks\val_X.csv')
+    Y_val = pd.read_csv(r'C:\Users\kashann\PycharmProjects\mimic3-benchmarks\val_Y.csv')
+    X_test = pd.read_csv(r'C:\Users\kashann\PycharmProjects\mimic3-benchmarks\test_X.csv')
+    Y_test = pd.read_csv(r'C:\Users\kashann\PycharmProjects\mimic3-benchmarks\test_Y.csv')
     X = pd.concat([X_train, X_val, X_test])
     Y = pd.concat([Y_train, Y_val, Y_test])
-    # convet Y to numpy array
-    Y = Y.to_numpy().reshape(-1)
+    Y=Y.to_numpy().reshape(-1)
+    #balance classes no noise
+    X, Y = balance_class_no_noise(X.to_numpy(), Y)
+    X = pd.DataFrame(X)
     return X, Y, 17
 
 

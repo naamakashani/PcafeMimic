@@ -15,10 +15,11 @@ class myEnv(gymnasium.Env):
         self.X_train, self.X_val, self.y_train, self.y_val = train_test_split(self.X_train,
                                                                               self.y_train,
                                                                                test_size=0.1, random_state=24)
-        self.cost_list= [1,2,6,1,1,1,1,7,1,1,2,7,2,2,1,1,7,1]
-        # self.cost_list = [1] * (self.guesser.tests_number + 1)
+        #self.cost_list= [1,2,6,1,1,1,1,7,1,1,2,7,2,2,1,1,7,1]
+        self.cost_list = [1] * (self.guesser.tests_number + 1)
         self.cost_budget = sum(self.cost_list)
         self.prob_list = [cost / self.cost_budget for cost in self.cost_list]
+
         self.num_classes = self.guesser.num_classes
         # Load pre-trained guesser network, if needed
         if load_pretrained_guesser:

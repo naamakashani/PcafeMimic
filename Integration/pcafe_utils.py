@@ -24,7 +24,6 @@ def add_noise(X, noise_std=0.01):
     X_noisy = X + noise
     return X_noisy
 
-    return X_balanced, y_balanced
 
 
 def balance_class(X, y, noise_std=0.01):
@@ -92,12 +91,12 @@ def load_mimiciii():
 
 
 def load_mimic_time_series():
-    X_train = pd.read_csv(r'C:\Users\kashann\PycharmProjects\mimic3-benchmarks\train_X.csv')
-    Y_train = pd.read_csv(r'C:\Users\kashann\PycharmProjects\mimic3-benchmarks\train_Y.csv')
-    X_val = pd.read_csv(r'C:\Users\kashann\PycharmProjects\mimic3-benchmarks\val_X.csv')
-    Y_val = pd.read_csv(r'C:\Users\kashann\PycharmProjects\mimic3-benchmarks\val_Y.csv')
-    X_test = pd.read_csv(r'C:\Users\kashann\PycharmProjects\mimic3-benchmarks\test_X.csv')
-    Y_test = pd.read_csv(r'C:\Users\kashann\PycharmProjects\mimic3-benchmarks\test_Y.csv')
+    X_train = pd.read_csv(r'C:\Users\mirac\Documents\GitHub\PcafeMimic\input\data_time_series\train_X.csv')
+    Y_train = pd.read_csv(r'C:\Users\mirac\Documents\GitHub\PcafeMimic\input\data_time_series\train_Y.csv')
+    X_val = pd.read_csv(r'C:\Users\mirac\Documents\GitHub\PcafeMimic\input\data_time_series\val_X.csv')
+    Y_val = pd.read_csv(r'C:\Users\mirac\Documents\GitHub\PcafeMimic\input\data_time_series\val_Y.csv')
+    X_test = pd.read_csv(r'C:\Users\mirac\Documents\GitHub\PcafeMimic\input\data_time_series\test_X.csv')
+    Y_test = pd.read_csv(r'C:\Users\mirac\Documents\GitHub\PcafeMimic\input\data_time_series\test_Y.csv')
     X = pd.concat([X_train, X_val, X_test])
     Y = pd.concat([Y_train, Y_val, Y_test])
     Y=Y.to_numpy().reshape(-1)

@@ -11,29 +11,33 @@ from transformers import AutoModel, AutoTokenizer, PegasusForConditionalGenerati
     BartForConditionalGeneration, BartTokenizer
 import argparse
 import numpy as np
-import utils
+
+import pcafe_utils
 import pandas as pd
+
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("--directory",
                     type=str,
-                    default=r'C:\Users\kashann\PycharmProjects\PCAFE-MIMIC\Integration',
+                    default=r'C:\Users\mirac\Documents\GitHub\PcafeMimic\Integration',
                     help="Directory for saved models")
-parser.add_argument("--diabetes_directory",
-                    type=str,
-                    default=r'C:\Users\kashann\PycharmProjects\PCAFE\RL\DATA\diabetes_clean.csv',
-                    help="Directory for saved models")
+# parser.add_argument("--diabetes_directory",
+#                     type=str,
+#                     default=r'C:\Users\kashann\PycharmProjects\PCAFE\RL\DATA\diabetes_clean.csv',
+#                     help="Directory for saved models")
 parser.add_argument("--mimic_no_text",
                     type=str,
-                    default= r'C:\Users\kashann\PycharmProjects\mimic-code-extract\mimic-iii\notebooks\ipynb_example\data_numeric.json',
+                    default= r'C:\Users\mirac\Documents\GitHub\PcafeMimic\input\data_numeric.json',
                     help="mimic data without text")
 parser.add_argument("--mimic_directory",
                     type=str,
-                    default=r'C:\Users\kashann\PycharmProjects\mimic-code-extract\mimic-iii\notebooks\ipynb_example\data_with_text.json',
+                    default=r'C:\Users\mirac\Documents\GitHub\PcafeMimic\input\data_with_text.json',
                     help="Directory for saved models")
 parser.add_argument("--num_epochs",
                     type=int,
-                    default=10000,
+                    default=6,
                     help="number of epochs")
 parser.add_argument("--hidden-dim1",
                     type=int,
@@ -62,7 +66,7 @@ parser.add_argument("--fraction_mask",
                     help="fraction mask")
 parser.add_argument("--run_validation",
                     type=int,
-                    default=500,
+                    default=10,
                     help="after how many epochs to run validation")
 parser.add_argument("--batch_size",
                     type=int,
@@ -132,16 +136,15 @@ def map_multiple_features(sample):
         index_map[i] = [i]
     return index_map
 
-DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 class MultimodalGuesser(nn.Module):
     def __init__(self):
         super(MultimodalGuesser, self).__init__()
         self.device= DEVICE
         # self.X needs to be balanced DF, tests_number needs to be the number of tests that reveales the features self.y is the labels numpy array
-        # self.X, self.y, self.tests_number = utils.load_diabetes(FLAGS.diabetes_directory)
-        # self.X, self.y, self.tests_number = utils.load_mimic_text(FLAGS.mimic_directory)
-        # self.X, self.y, self.tests_number = utils.load_mimic_time_series()
-        self.X, self.y, self.tests_number = utils.load_mimic_no_text(FLAGS.mimic_no_text)
+        # self.X, self.y, self.tests_number = pcafe_utils.load_diabetes(FLAGS.diabetes_directory)
+        # self.X, self.y, self.tests_number = pcafe_utils.load_mimic_text(FLAGS.mimic_directory)
+        self.X, self.y, self.tests_number = pcafe_utils.load_mimic_time_series()
+        # self.X, self.y, self.tests_number = pcafe_utils.load_mimic_no_text(FLAGS.mimic_no_text)
         self.summarize_text_model = BartForConditionalGeneration.from_pretrained("facebook/bart-large-cnn").to(self.device)
         self.tokenizer_summarize_text_model = BartTokenizer.from_pretrained("facebook/bart-large-cnn")
         self.text_model = AutoModel.from_pretrained("emilyalsentzer/Bio_ClinicalBERT").to(self.device)
@@ -277,14 +280,14 @@ class MultimodalGuesser(nn.Module):
                 # Handle text: assume feature is text and process it
                 feature_embed = self.embed_text_with_clinicalbert(feature)
             elif pd.isna(feature):
-                feature_embed = torch.tensor([0] * self.text_reduced_dim, dtype=torch.float32).unsqueeze(0).to(self.device)
+                feature_embed = torch.tensor([0] * self.text_reduced_dim, dtype=torch.float32).unsqueeze(0).to(DEVICE)
             elif self.is_numeric_value(feature):
                 # Handle numeric: directly convert to tensor
-                feature_embed = torch.tensor([feature], dtype=torch.float32).unsqueeze(0).to(self.device)
+                feature_embed = torch.tensor([feature], dtype=torch.float32).unsqueeze(0).to(DEVICE)
 
             sample_embeddings.append(feature_embed)
 
-        x = torch.cat(sample_embeddings, dim=1)
+        x = torch.cat(sample_embeddings, dim=1).to(DEVICE)
         x = x.squeeze(dim=1)
         x = self.layer1(x)
         x = self.layer2(x)
@@ -357,7 +360,7 @@ def create_adverserial_input(sample, label, pretrained_model):
         sample_embeddings.append(feature_embed)
 
     input = torch.cat(sample_embeddings, dim=1)
-    input = input.squeeze(dim=1)
+    input = input.squeeze(dim=1).to(DEVICE)
     pretrained_model.eval()
 
     # Set requires_grad to True to calculate gradients with respect to input
@@ -451,8 +454,9 @@ def train_model(model,
                 print('Did not achieve val AUC improvement for {} trials, training is done.'.format(
                     FLAGS.val_trials_wo_im))
                 break
-    plot_running_loss(loss_list)
+        print("finished " + str(j) + " out of " + str(nepochs) + " epochs")
 
+    plot_running_loss(loss_list)
 
 def save_model(model):
     '''
@@ -471,7 +475,8 @@ def save_model(model):
         os.remove(guesser_save_path)
     torch.save(model.cpu().state_dict(), guesser_save_path + '~')
     os.rename(guesser_save_path + '~', guesser_save_path)
-
+    model.to(DEVICE)
+    
 
 def val(model, X_val, y_val, best_val_auc=0):
     correct = 0
@@ -479,8 +484,8 @@ def val(model, X_val, y_val, best_val_auc=0):
     num_samples = len(X_val)
     with torch.no_grad():
         for i in range(1, num_samples):
-            input = X_val[i]
-            label = torch.tensor(y_val[i], dtype=torch.long).to(model.device)
+            input = torch.tensor(X_val[i]).to(DEVICE)
+            label = torch.tensor(y_val[i], dtype=torch.long).to(DEVICE)
             output = model(input)
             _, predicted = torch.max(output.data, 1)
             if predicted == label:
@@ -513,7 +518,7 @@ def test(model, X_test, y_test):
             if predicted == label:
                 correct += 1
 
-            y_true.append(label)  # Assuming labels is a numpy array
+            y_true.append(label.item())  # Assuming labels is a numpy array
             y_pred.append(predicted.item())
 
     y_true = np.array(y_true)

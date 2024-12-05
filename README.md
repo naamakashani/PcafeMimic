@@ -4,7 +4,7 @@
 
 ## **Key Contributions**
 
-- **Personalized Cost-Aware Feature Selection (FS):**  
+## **Personalized Cost-Aware Feature Selection (FS):**  
   A novel method tailored for EHR datasets, addressing challenges such as:  
   - Multiple data modalities  
   - Missing values  

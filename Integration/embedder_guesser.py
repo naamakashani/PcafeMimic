@@ -143,10 +143,9 @@ class MultimodalGuesser(nn.Module):
         super(MultimodalGuesser, self).__init__()
         self.device= DEVICE
         # self.X needs to be balanced DF, tests_number needs to be the number of tests that reveales the features self.y is the labels numpy array
-        # self.X, self.y, self.tests_number = pcafe_utils.load_diabetes(FLAGS.diabetes_directory)
-        # self.X, self.y, self.tests_number = pcafe_utils.load_mimic_text(FLAGS.mimic_directory)
-        self.X, self.y, self.tests_number = pcafe_utils.load_mimic_time_series()
-        # self.X, self.y, self.tests_number = pcafe_utils.load_mimic_no_text(FLAGS.mimic_no_text)
+        self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_text()
+        #self.X, self.y, self.tests_number ,self.map_test= pcafe_utils.load_mimic_time_series()
+        # self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_no_text()
         self.summarize_text_model = BartForConditionalGeneration.from_pretrained("facebook/bart-large-cnn").to(self.device)
         self.tokenizer_summarize_text_model = BartTokenizer.from_pretrained("facebook/bart-large-cnn")
         self.text_model = AutoModel.from_pretrained("emilyalsentzer/Bio_ClinicalBERT").to(self.device)
@@ -163,9 +162,6 @@ class MultimodalGuesser(nn.Module):
         self.features_total = len(numeric_features) + (self.X.shape[1] - len(numeric_features)) * self.text_reduced_dim
         # this function map the index of the features to the index of the input
         self.map_feature = map_features_to_indices(self.X.iloc[0])
-        # change this function to map the tests to what features they reveal
-        # self.map_test = map_multiple_features(self.X.iloc[0])
-        self.map_test = map_multiple_features_for_logistic_mimic(self.X.iloc[0])
         self.layer1 = torch.nn.Sequential(
             torch.nn.Linear(self.features_total, FLAGS.hidden_dim1),
             torch.nn.PReLU(),
@@ -568,4 +564,5 @@ def main():
 
 
 if __name__ == "__main__":
+    os.chdir(FLAGS.directory)
     main()

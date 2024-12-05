@@ -74,6 +74,22 @@ def load_fetal():
     return X, Y, Y, len(X[0])
 
 
+def map_multiple_features(sample):
+    index_map = {}
+    for i in range(0, sample.shape[0]):
+        index_map[i] = [i]
+    return index_map
+
+
+
+def map_multiple_features_for_logistic_mimic(sample):
+    # map the index features that each test reveals
+    index_map = {}
+    for i in range(0, 17):
+        index_map[i] = list(range(i * 42, i * 42 + 42))
+    return index_map
+
+
 def load_mimiciii():
     file_path = r'C:\Users\kashann\PycharmProjects\mimic-code-extract\mimic-iii\notebooks\ipynb_example\filtered_data.csv'
     df = pd.read_csv(file_path)
@@ -89,7 +105,7 @@ def load_mimiciii():
     # CONVERT ALL COLUMN EXEPT LAST 2 and
     # for i in range(0, len(X.columns) - 1):
     #     X[i] = X[i].astype(float)
-    return X, Y, len(X.columns)
+    return X, Y, len(X.columns), map_multiple_features(X.iloc[0])
 
 
 def load_mimic_time_series():
@@ -117,10 +133,14 @@ def load_mimic_time_series():
     #balance classes no noise
     X, Y = balance_class_no_noise(X.to_numpy(), Y)
     X = pd.DataFrame(X)
-    return X, Y, 17
+    map_test = map_multiple_features_for_logistic_mimic(X.iloc[0])
+    return X, Y, 17, map_test
 
 
-def load_mimic_text(path):
+def load_mimic_text():
+    base_dir = os.getcwd()
+    # Construct file paths dynamically
+    path = os.path.join(base_dir, 'input\\data_with_text.json')
     df = pd.read_json(path, lines=True)
     df = df.drop(columns=['subject_id', 'hadm_id', 'icustay_id'])
     # define the label mortality_inhospital as Y and drop from df
@@ -129,10 +149,13 @@ def load_mimic_text(path):
     # balance classes no noise
     X, Y = balance_class_no_noise(df.to_numpy(), Y)
     X = pd.DataFrame(X)
-    return X, Y, len(X.columns)
+    map_test = map_multiple_features(X.iloc[0])
+    return X, Y, len(X.columns), map_test
 
-def load_mimic_no_text(path):
-
+def load_mimic_no_text():
+    base_dir = os.getcwd()
+    # Construct file paths dynamically
+    path = os.path.join(base_dir, 'input\\data_numeric.json')
     df = pd.read_json(path, lines=True)
     df = df.drop(columns=['subject_id', 'hadm_id', 'icustay_id'])
     # define the label mortality_inhospital as Y and drop from df
@@ -141,7 +164,7 @@ def load_mimic_no_text(path):
     # balance classes no noise
     X, Y = balance_class_no_noise(df.to_numpy(), Y)
     X = pd.DataFrame(X)
-    return X, Y, len(X.columns)
+    return X, Y, len(X.columns), map_multiple_features(X.iloc[0])
 
 
 def load_text_data():

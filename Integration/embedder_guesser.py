@@ -7,37 +7,39 @@ import torchvision.transforms as transforms
 from PIL import Image
 from sklearn.metrics import confusion_matrix
 from sklearn.model_selection import train_test_split
-from transformers import AutoModel, AutoTokenizer, PegasusForConditionalGeneration, PegasusTokenizer, \
+from transformers import AutoModel, AutoTokenizer,\
     BartForConditionalGeneration, BartTokenizer
 import argparse
 import numpy as np
-
 import pcafe_utils
 import pandas as pd
-
+import json
+from pathlib import Path
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+# Load JSON configuration
+with open(r'C:\Users\kashann\PycharmProjects\PCAFE-MIMIC\Integration\user_config_naama.json', 'r') as f:
+    config = json.load(f)
+
+# Get the project path from the JSON
+project_path = Path(config["user_specific_project_path"])
 
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("--directory",
                     type=str,
-                    default=r'C:\Users\mirac\Documents\GitHub\PcafeMimic\Integration',
+                    default=project_path,
                     help="Directory for saved models")
-# parser.add_argument("--diabetes_directory",
+# parser.add_argument("--mimic_no_text",
 #                     type=str,
-#                     default=r'C:\Users\kashann\PycharmProjects\PCAFE\RL\DATA\diabetes_clean.csv',
+#                     default= r'C:\Users\mirac\Documents\GitHub\PcafeMimic\input\data_numeric.json',
+#                     help="mimic data without text")
+# parser.add_argument("--mimic_directory",
+#                     type=str,
+#                     default=r'C:\Users\mirac\Documents\GitHub\PcafeMimic\input\data_with_text.json',
 #                     help="Directory for saved models")
-parser.add_argument("--mimic_no_text",
-                    type=str,
-                    default= r'C:\Users\mirac\Documents\GitHub\PcafeMimic\input\data_numeric.json',
-                    help="mimic data without text")
-parser.add_argument("--mimic_directory",
-                    type=str,
-                    default=r'C:\Users\mirac\Documents\GitHub\PcafeMimic\input\data_with_text.json',
-                    help="Directory for saved models")
 parser.add_argument("--num_epochs",
                     type=int,
-                    default=6,
+                    default=1000,
                     help="number of epochs")
 parser.add_argument("--hidden-dim1",
                     type=int,
@@ -66,7 +68,7 @@ parser.add_argument("--fraction_mask",
                     help="fraction mask")
 parser.add_argument("--run_validation",
                     type=int,
-                    default=10,
+                    default=30,
                     help="after how many epochs to run validation")
 parser.add_argument("--batch_size",
                     type=int,
@@ -566,5 +568,4 @@ def main():
 
 
 if __name__ == "__main__":
-    os.chdir(FLAGS.directory)
     main()

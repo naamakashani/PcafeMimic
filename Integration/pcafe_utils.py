@@ -1,4 +1,6 @@
 import csv
+import os
+
 from scipy.io import loadmat
 from sklearn.preprocessing import StandardScaler
 from ucimlrepo import fetch_ucirepo
@@ -91,12 +93,24 @@ def load_mimiciii():
 
 
 def load_mimic_time_series():
-    X_train = pd.read_csv(r'C:\Users\mirac\Documents\GitHub\PcafeMimic\input\data_time_series\train_X.csv')
-    Y_train = pd.read_csv(r'C:\Users\mirac\Documents\GitHub\PcafeMimic\input\data_time_series\train_Y.csv')
-    X_val = pd.read_csv(r'C:\Users\mirac\Documents\GitHub\PcafeMimic\input\data_time_series\val_X.csv')
-    Y_val = pd.read_csv(r'C:\Users\mirac\Documents\GitHub\PcafeMimic\input\data_time_series\val_Y.csv')
-    X_test = pd.read_csv(r'C:\Users\mirac\Documents\GitHub\PcafeMimic\input\data_time_series\test_X.csv')
-    Y_test = pd.read_csv(r'C:\Users\mirac\Documents\GitHub\PcafeMimic\input\data_time_series\test_Y.csv')
+    # Get the current working directory
+    base_dir = os.getcwd()
+    # Construct file paths dynamically
+    train_X_path = os.path.join(base_dir, 'input\\data_time_series\\train_X.csv')
+    train_Y_path = os.path.join(base_dir, 'input\\data_time_series\\train_Y.csv')
+    val_X_path = os.path.join(base_dir, 'input\\data_time_series\\val_X.csv')
+    val_Y_path = os.path.join(base_dir, 'input\\data_time_series\\val_Y.csv')
+    test_X_path = os.path.join(base_dir, 'input\\data_time_series\\test_X.csv')
+    test_Y_path = os.path.join(base_dir, 'input\\data_time_series\\test_Y.csv')
+
+    # Read the files
+    X_train = pd.read_csv(train_X_path)
+    Y_train = pd.read_csv(train_Y_path)
+    X_val = pd.read_csv(val_X_path)
+    Y_val = pd.read_csv(val_Y_path)
+    X_test = pd.read_csv(test_X_path)
+    Y_test = pd.read_csv(test_Y_path)
+
     X = pd.concat([X_train, X_val, X_test])
     Y = pd.concat([Y_train, Y_val, Y_test])
     Y=Y.to_numpy().reshape(-1)

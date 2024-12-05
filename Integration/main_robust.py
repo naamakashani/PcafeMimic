@@ -6,8 +6,17 @@ from env_robust import *
 from agent import *
 from PrioritiziedReplayMemory import *
 from sklearn.metrics import roc_auc_score, average_precision_score
+with open(r'C:\Users\kashann\PycharmProjects\PCAFE-MIMIC\Integration\user_config_naama.json', 'r') as f:
+    config = json.load(f)
+
+# Get the project path from the JSON
+project_path = Path(config["user_specific_project_path"])
 
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+parser.add_argument("--directory",
+                    type=str,
+                    default=project_path,
+                    help="Directory for saved models")
 parser.add_argument("--save_dir",
                     type=str,
                     default='ddqn_robust_models',
@@ -16,10 +25,6 @@ parser.add_argument("--save_guesser_dir",
                     type=str,
                     default='model_robust_embedder_guesser',
                     help="Directory for saved guesser model")
-parser.add_argument("--directory",
-                    type=str,
-                    default=r'C:\Users\kashann\PycharmProjects\PCAFE-MIMIC\Integration',
-                    help="Directory for saved models")
 parser.add_argument("--gamma",
                     type=float,
                     default=0.9,
@@ -76,7 +81,7 @@ parser.add_argument("--lr_decay_factor",
 #change these parameters
 parser.add_argument("--val_interval",
                     type=int,
-                    default=300,
+                    default=30,
                     help="Interval for calculating validation reward and saving model")
 parser.add_argument("--val_trials_wo_im",
                     type=int,
@@ -84,7 +89,7 @@ parser.add_argument("--val_trials_wo_im",
                     help="Number of validation trials without improvement")
 parser.add_argument("--cost_budget",
                     type=int,
-                    default=17,
+                    default=40,
                     help="Number of validation trials without improvement")
 
 FLAGS = parser.parse_args(args=[])
@@ -580,5 +585,6 @@ def main():
 
 
 if __name__ == '__main__':
+    os.chdir(FLAGS.directory)
     main()
 

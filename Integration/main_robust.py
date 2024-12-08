@@ -6,6 +6,7 @@ from env_robust import *
 from agent import *
 from PrioritiziedReplayMemory import *
 from sklearn.metrics import roc_auc_score, average_precision_score
+import time
 with open(r'C:\Users\kashann\PycharmProjects\PCAFE-MIMIC\Integration\user_config_naama.json', 'r') as f:
     config = json.load(f)
 
@@ -385,7 +386,7 @@ def test(env, agent, state_dim, output_dim):
     return acc, intersect, union, steps
 
 
-#
+
 def check_intersecion_union(mask_list):
     # Convert the list of tensors to a 2D tensor
     selected_features_tensor = torch.stack(mask_list)
@@ -415,8 +416,7 @@ def val(i_episode: int,
     y_hat_val = np.zeros(len(env.y_val))
     y_hat_probs = np.zeros(len(env.y_val))
     cost_list = []
-
-
+    start_time = time.time()
     for i in range(len(env.X_val)):
         state = env.reset(mode='val',
                           patient=i,
@@ -452,6 +452,9 @@ def val(i_episode: int,
             y_hat_probs[i] = env.prob_classes
 
         cost_list.append(sum_cost)
+
+    end_time = time.time()
+    print(f"Validation time: {end_time - start_time}")
 
     auc_roc = roc_auc_score(env.y_val, y_hat_probs)
     print(f"AUC-ROC: {auc_roc}")
@@ -532,11 +535,6 @@ def main():
 
 
 
-
-
-
-
-#
 # def show_sample_paths(n_patients, env, agent):
 #     """A method to run episodes on randomly chosen positive and negative test patients, and print trajectories to console  """
 #     print('Loading best networks')

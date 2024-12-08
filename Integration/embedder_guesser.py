@@ -143,8 +143,8 @@ class MultimodalGuesser(nn.Module):
         super(MultimodalGuesser, self).__init__()
         self.device= DEVICE
         # self.X needs to be balanced DF, tests_number needs to be the number of tests that reveales the features self.y is the labels numpy array
-        self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_text()
-        #self.X, self.y, self.tests_number ,self.map_test= pcafe_utils.load_mimic_time_series()
+        #self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_text()
+        self.X, self.y, self.tests_number ,self.map_test= pcafe_utils.load_mimic_time_series()
         # self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_no_text()
         self.summarize_text_model = BartForConditionalGeneration.from_pretrained("facebook/bart-large-cnn").to(self.device)
         self.tokenizer_summarize_text_model = BartTokenizer.from_pretrained("facebook/bart-large-cnn")
@@ -477,6 +477,7 @@ def save_model(model):
     
 
 def val(model, X_val, y_val, best_val_auc=0):
+    #count time for this function
     correct = 0
     model.eval()
     num_samples = len(X_val)

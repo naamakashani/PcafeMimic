@@ -82,7 +82,7 @@ parser.add_argument("--lr_decay_factor",
 #change these parameters
 parser.add_argument("--val_interval",
                     type=int,
-                    default=30,
+                    default=10,
                     help="Interval for calculating validation reward and saving model")
 parser.add_argument("--val_trials_wo_im",
                     type=int,

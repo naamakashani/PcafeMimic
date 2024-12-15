@@ -7,7 +7,7 @@ import torchvision.transforms as transforms
 from PIL import Image
 from sklearn.metrics import confusion_matrix
 from sklearn.model_selection import train_test_split
-from transformers import AutoModel, AutoTokenizer,\
+from transformers import AutoModel, AutoTokenizer, \
     BartForConditionalGeneration, BartTokenizer
 import argparse
 import numpy as np
@@ -15,6 +15,7 @@ import pcafe_utils
 import pandas as pd
 import json
 from pathlib import Path
+
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Load JSON configuration
@@ -29,14 +30,6 @@ parser.add_argument("--directory",
                     type=str,
                     default=project_path,
                     help="Directory for saved models")
-# parser.add_argument("--mimic_no_text",
-#                     type=str,
-#                     default= r'C:\Users\mirac\Documents\GitHub\PcafeMimic\input\data_numeric.json',
-#                     help="mimic data without text")
-# parser.add_argument("--mimic_directory",
-#                     type=str,
-#                     default=r'C:\Users\mirac\Documents\GitHub\PcafeMimic\input\data_with_text.json',
-#                     help="Directory for saved models")
 parser.add_argument("--num_epochs",
                     type=int,
                     default=1000,
@@ -112,16 +105,28 @@ class ImageEmbedder(nn.Module):
 
 
 def map_features_to_indices(data):
+    """
+    Map features to indices based on their type.
+    If any value in a column is a string, treat the column as text.
+    :param data: 2D array-like dataset (list of lists, numpy array, or pandas DataFrame)
+    :return: A dictionary mapping feature indices to lists of indices and the total number of features
+    """
     index_map = {}
     current_index = 0
-    for i, feature in enumerate(data):
-        if isinstance(feature, str):  # Check if feature is text
-            index_map[i] = list(range(current_index, current_index + 20))
+    data = np.array(data)  # Ensure input is a NumPy array for easier handling
+
+    # Check each column to determine type (string/text or numeric)
+    for col_index in range(data.shape[1]):  # Iterate over columns
+        column_data = data[:, col_index]  # Extract the entire column
+
+        if any(isinstance(value, str) for value in column_data):  # Check for any string in the column
+            index_map[col_index] = list(range(current_index, current_index + 20))  # Text feature
             current_index += 20
-        else:  # Assume it's numeric if not text
-            index_map[i] = [current_index]
+        else:
+            index_map[col_index] = [current_index]  # Numeric feature
             current_index += 1
-    return index_map
+
+    return index_map, current_index
 
 
 def map_multiple_features_for_logistic_mimic(sample):
@@ -138,15 +143,17 @@ def map_multiple_features(sample):
         index_map[i] = [i]
     return index_map
 
+
 class MultimodalGuesser(nn.Module):
     def __init__(self):
         super(MultimodalGuesser, self).__init__()
-        self.device= DEVICE
+        self.device = DEVICE
         # self.X needs to be balanced DF, tests_number needs to be the number of tests that reveales the features self.y is the labels numpy array
-        #self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_text()
-        self.X, self.y, self.tests_number ,self.map_test= pcafe_utils.load_mimic_time_series()
+        # self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_text()
+        self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_text()
         # self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_no_text()
-        self.summarize_text_model = BartForConditionalGeneration.from_pretrained("facebook/bart-large-cnn").to(self.device)
+        self.summarize_text_model = BartForConditionalGeneration.from_pretrained("facebook/bart-large-cnn").to(
+            self.device)
         self.tokenizer_summarize_text_model = BartTokenizer.from_pretrained("facebook/bart-large-cnn")
         self.text_model = AutoModel.from_pretrained("emilyalsentzer/Bio_ClinicalBERT").to(self.device)
         self.tokenizer = AutoTokenizer.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
@@ -154,14 +161,7 @@ class MultimodalGuesser(nn.Module):
         self.text_reducer = nn.Linear(FLAGS.text_embed_dim, FLAGS.reduced_dim).to(self.device)
         self.text_reduced_dim = FLAGS.reduced_dim
         self.num_classes = len(np.unique(self.y))
-        # check how many numeric features we have in the dataset
-        numeric_features = []
-        for i in range(self.X.shape[1]):
-            if isinstance(self.X.iloc[0, i], (int, float)) and not np.isnan(self.X.iloc[0, i]):
-                numeric_features.append(i)
-        self.features_total = len(numeric_features) + (self.X.shape[1] - len(numeric_features)) * self.text_reduced_dim
-        # this function map the index of the features to the index of the input
-        self.map_feature = map_features_to_indices(self.X.iloc[0])
+        self.map_feature, self.features_total = map_features_to_indices(self.X)
         self.layer1 = torch.nn.Sequential(
             torch.nn.Linear(self.features_total, FLAGS.hidden_dim1),
             torch.nn.PReLU(),
@@ -187,7 +187,6 @@ class MultimodalGuesser(nn.Module):
         self.layer2 = self.layer2.to(self.device)
         self.layer3 = self.layer3.to(self.device)
         self.logits = self.logits.to(self.device)
-
 
     def summarize_text(self, text, max_length=300, min_length=100, length_penalty=2.0, num_beams=4):
         """
@@ -232,13 +231,13 @@ class MultimodalGuesser(nn.Module):
         outputs = self.text_model(**inputs)
         # Use the CLS token representation (first token)
         cls_embedding = outputs.last_hidden_state[:, 0, :].to(self.device)
-        #check this line
+        # check this line
         return F.relu(self.text_reducer(cls_embedding))
 
     def embed_image(self, image_path):
         # Get image embedding using ImageEmbedder
         img = Image.open(image_path).convert('L')  # Open the image
-        img = self.img_embedder.transform(img).unsqueeze(0).to(self.device) # Apply transforms and add batch dimension
+        img = self.img_embedder.transform(img).unsqueeze(0).to(self.device)  # Apply transforms and add batch dimension
         embedding = self.img_embedder(img).to(self.device)
         return embedding
 
@@ -266,10 +265,8 @@ class MultimodalGuesser(nn.Module):
             else:
                 return False
 
-    def forward(self, input):
-
+    def forward(self, input, mask=None):
         sample_embeddings = []
-
         for feature in input:
             if self.is_image_value(feature):
                 # Handle image path: assume feature is a path and process it
@@ -286,6 +283,10 @@ class MultimodalGuesser(nn.Module):
             sample_embeddings.append(feature_embed)
 
         x = torch.cat(sample_embeddings, dim=1).to(DEVICE)
+        if mask is not None:
+            # Convert binary_mask (NumPy array) to a PyTorch tensor
+            mask = torch.tensor(mask, dtype=x.dtype, device=x.device)
+            x = x * mask
         x = x.squeeze(dim=1)
         x = self.layer1(x)
         x = self.layer2(x)
@@ -300,45 +301,28 @@ class MultimodalGuesser(nn.Module):
         return probs
 
 
-def mask(input: np.array, model) -> np.array:
+def create_mask(model) -> np.array:
     '''
     Mask feature of the input
     :param images: input
     :return: masked input
     '''
-    # reduce the input to 1 dim
-    input = input.flatten()
-    masked_input = []
-    for i in range(input.shape[0]):
-        if pd.isna(input[i]):
-            masked_input.extend([0] * model.text_reduced_dim)
+    mapping = model.map_feature
+    binary_mask = np.zeros(model.features_total)
+    for key, value in mapping.items():
+        if np.random.rand() < FLAGS.fraction_mask:
+            # mask all the keys entries in binary mask
+            for i in value:
+                binary_mask[i] = 0
         else:
-            fraction = FLAGS.fraction_mask
-            if np.random.rand() < fraction:
-                if model.is_numeric_value(input[i]):
-                    masked_input.append(0)
-                else:
-                    # append model.text_reduced_dim zeros to the masked_input
-                    masked_input.extend([0] * model.text_reduced_dim)
-            else:
-                masked_input.append(input[i])
-
-    return masked_input
+            for i in value:
+                binary_mask[i] = 1
+    return binary_mask
 
 
-def mask_specific_feature(sample, max_gradients_index, pretrained_model):
-    masked_sample = []
-    for i, feature in enumerate(sample):
-        if sample[i] is np.nan:
-            masked_sample.extend([0] * pretrained_model.text_reduced_dim)
-        elif i == max_gradients_index:
-            if pretrained_model.is_numeric_value(feature):
-                masked_sample.append(0)
-            else:
-                masked_sample.extend([0] * pretrained_model.text_reduced_dim)
-        else:
-            masked_sample.append(feature)
-    return masked_sample
+
+
+
 
 
 def create_adverserial_input(sample, label, pretrained_model):
@@ -351,7 +335,8 @@ def create_adverserial_input(sample, label, pretrained_model):
             # Handle text: assume feature is text and process it
             feature_embed = pretrained_model.embed_text_with_clinicalbert(feature)
         elif pd.isna(feature):
-            feature_embed = torch.tensor([0] * pretrained_model.text_reduced_dim, dtype=torch.float32).unsqueeze(0).to(pretrained_model.device)
+            feature_embed = torch.tensor([0] * pretrained_model.text_reduced_dim, dtype=torch.float32).unsqueeze(0).to(
+                pretrained_model.device)
         elif pretrained_model.is_numeric_value(feature):
             # Handle numeric: directly convert to tensor
             feature_embed = torch.tensor([feature], dtype=torch.float32).unsqueeze(0).to(pretrained_model.device)
@@ -382,11 +367,20 @@ def create_adverserial_input(sample, label, pretrained_model):
     # Identify the most influential features (those with the largest absolute gradients).
     absolute_gradients = torch.abs(gradient)
     max_gradients_index = torch.argmax(absolute_gradients, dim=-1).item()
+
     for key, value in pretrained_model.map_feature.items():
         if max_gradients_index in value:
             max_gradients_index = key
             break
-    return mask_specific_feature(sample, max_gradients_index, pretrained_model)
+
+    binary_mask = np.ones(pretrained_model.features_total)
+    for key, value in pretrained_model.map_feature.items():
+        if key == max_gradients_index:
+            for i in value:
+                binary_mask[i] = 0
+
+    return binary_mask
+
 
 
 def plot_running_loss(loss_list):
@@ -397,9 +391,11 @@ def plot_running_loss(loss_list):
     plt.title('Running Loss')
     plt.show()
 
+
 def compute_probabilities(j, total_episodes):
     prob_mask = 0.8 + 0.2 * (1 - j / total_episodes)  # Starts at 1, decreases to 0.8
     return prob_mask
+
 
 def train_model(model,
                 nepochs, X_train, y_train, X_val, y_val):
@@ -418,16 +414,17 @@ def train_model(model,
         # Process each sample in the batch
         for i in random_indices:
             input = X_train[i]
-            label = torch.tensor([y_train[i]], dtype=torch.long).to(model.device)   # Convert label to tensor
-            prob_mask= compute_probabilities(j, nepochs)
+            label = torch.tensor([y_train[i]], dtype=torch.long).to(model.device)  # Convert label to tensor
+            prob_mask = compute_probabilities(j, nepochs)
+            prob_mask = 0
             # Decide the action based on the computed probabilities
             if random.random() < prob_mask:
-                new_input = mask(input, model)
+                mask = create_mask(model)
             else:
-                new_input = create_adverserial_input(input, label, model)
+                mask = create_adverserial_input(input, label, model)
 
             # Forward pass
-            output = model(new_input)
+            output = model(input, mask)
             loss = model.criterion(output, label)
             running_loss += loss.item()  # Accumulate loss for the batch
 
@@ -456,6 +453,7 @@ def train_model(model,
 
     plot_running_loss(loss_list)
 
+
 def save_model(model):
     '''
     Save the model to a given path
@@ -474,10 +472,10 @@ def save_model(model):
     torch.save(model.cpu().state_dict(), guesser_save_path + '~')
     os.rename(guesser_save_path + '~', guesser_save_path)
     model.to(DEVICE)
-    
+
 
 def val(model, X_val, y_val, best_val_auc=0):
-    #count time for this function
+    # count time for this function
     correct = 0
     model.eval()
     num_samples = len(X_val)
@@ -511,7 +509,6 @@ def test(model, X_test, y_test):
         for i in range(len(X_test)):
             input = X_test[i]
             label = torch.tensor(y_test[i], dtype=torch.long).to(model.device)
-            # mask only nan values
             output = model(input)
             _, predicted = torch.max(output.data, 1)
             if predicted == label:
@@ -554,14 +551,6 @@ def main():
                 X_train, y_train, X_val, y_val)
 
     test(model, X_test, y_test)
-
-
-
-
-
-
-
-
 
 
 if __name__ == "__main__":

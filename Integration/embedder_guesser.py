@@ -416,7 +416,6 @@ def train_model(model,
             input = X_train[i]
             label = torch.tensor([y_train[i]], dtype=torch.long).to(model.device)  # Convert label to tensor
             prob_mask = compute_probabilities(j, nepochs)
-            prob_mask = 0
             # Decide the action based on the computed probabilities
             if random.random() < prob_mask:
                 mask = create_mask(model)

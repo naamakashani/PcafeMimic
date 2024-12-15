@@ -267,7 +267,7 @@ class MultimodalGuesser(nn.Module):
 
     def forward(self, input, mask=None):
         sample_embeddings = []
-        for feature in input:
+        for col_index, feature in enumerate(input):  # Use enumerate for indexing
             if self.is_image_value(feature):
                 # Handle image path: assume feature is a path and process it
                 feature_embed = self.embed_image(feature)
@@ -275,10 +275,12 @@ class MultimodalGuesser(nn.Module):
                 # Handle text: assume feature is text and process it
                 feature_embed = self.embed_text_with_clinicalbert(feature)
             elif pd.isna(feature):
-                feature_embed = torch.tensor([0] * self.text_reduced_dim, dtype=torch.float32).unsqueeze(0).to(DEVICE)
+                # Handle NaN: get the size for the current column
+                size = len(self.map_feature.get(col_index, []))  # Use column index
+                feature_embed = torch.zeros((1, size), dtype=torch.float32, device=DEVICE)
             elif self.is_numeric_value(feature):
                 # Handle numeric: directly convert to tensor
-                feature_embed = torch.tensor([feature], dtype=torch.float32).unsqueeze(0).to(DEVICE)
+                feature_embed = torch.tensor([[feature]], dtype=torch.float32, device=DEVICE)
 
             sample_embeddings.append(feature_embed)
 
@@ -480,7 +482,7 @@ def val(model, X_val, y_val, best_val_auc=0):
     num_samples = len(X_val)
     with torch.no_grad():
         for i in range(1, num_samples):
-            input = torch.tensor(X_val[i]).to(DEVICE)
+            input = X_val[i]
             label = torch.tensor(y_val[i], dtype=torch.long).to(DEVICE)
             output = model(input)
             _, predicted = torch.max(output.data, 1)

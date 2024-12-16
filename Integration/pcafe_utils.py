@@ -27,7 +27,6 @@ def add_noise(X, noise_std=0.01):
     return X_noisy
 
 
-
 def balance_class(X, y, noise_std=0.01):
     unique_classes, class_counts = np.unique(y, return_counts=True)
     minority_class = unique_classes[np.argmin(class_counts)]
@@ -81,7 +80,6 @@ def map_multiple_features(sample):
     return index_map
 
 
-
 def map_multiple_features_for_logistic_mimic(sample):
     # map the index features that each test reveals
     index_map = {}
@@ -129,12 +127,18 @@ def load_mimic_time_series():
 
     X = pd.concat([X_train, X_val, X_test])
     Y = pd.concat([Y_train, Y_val, Y_test])
-    Y=Y.to_numpy().reshape(-1)
-    #balance classes no noise
+    Y = Y.to_numpy().reshape(-1)
+    # balance classes no noise
     X, Y = balance_class_no_noise(X.to_numpy(), Y)
     X = pd.DataFrame(X)
     map_test = map_multiple_features_for_logistic_mimic(X.iloc[0])
     return X, Y, 17, map_test
+
+
+def clean_mimic_data_nan(X):
+    # drop columns where there are nan in more than 50% of the rows
+    X = X.dropna(axis=1, thresh=int(0.5 * X.shape[0]))
+    return X
 
 
 def load_mimic_text():
@@ -150,7 +154,9 @@ def load_mimic_text():
     X, Y = balance_class_no_noise(df.to_numpy(), Y)
     X = pd.DataFrame(X)
     map_test = map_multiple_features(X.iloc[0])
+    X = clean_mimic_data_nan(X)
     return X, Y, len(X.columns), map_test
+
 
 def load_mimic_no_text():
     base_dir = os.getcwd()

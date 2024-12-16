@@ -53,7 +53,7 @@ parser.add_argument("--weight_decay",
 # change these parameters
 parser.add_argument("--val_trials_wo_im",
                     type=int,
-                    default=10,
+                    default=4,
                     help="Number of validation trials without improvement")
 parser.add_argument("--fraction_mask",
                     type=int,
@@ -61,7 +61,7 @@ parser.add_argument("--fraction_mask",
                     help="fraction mask")
 parser.add_argument("--run_validation",
                     type=int,
-                    default=30,
+                    default=10,
                     help="after how many epochs to run validation")
 parser.add_argument("--batch_size",
                     type=int,
@@ -148,7 +148,7 @@ class MultimodalGuesser(nn.Module):
     def __init__(self):
         super(MultimodalGuesser, self).__init__()
         self.device = DEVICE
-        # self.X needs to be balanced DF, tests_number needs to be the number of tests that reveales the features self.y is the labels numpy array
+
         # self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_text()
         self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_text()
         # self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_no_text()

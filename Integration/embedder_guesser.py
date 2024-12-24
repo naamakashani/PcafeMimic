@@ -1,5 +1,6 @@
 import os
 import random
+import numpy as np
 import torch.nn.functional as F
 import torch
 import torch.nn as nn
@@ -10,11 +11,13 @@ from sklearn.model_selection import train_test_split
 from transformers import AutoModel, AutoTokenizer, \
     BartForConditionalGeneration, BartTokenizer
 import argparse
-import numpy as np
+
 import pcafe_utils
 import pandas as pd
 import json
 from pathlib import Path
+
+# import spacy
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -61,7 +64,7 @@ parser.add_argument("--fraction_mask",
                     help="fraction mask")
 parser.add_argument("--run_validation",
                     type=int,
-                    default=10,
+                    default=5,
                     help="after how many epochs to run validation")
 parser.add_argument("--batch_size",
                     type=int,
@@ -148,7 +151,6 @@ class MultimodalGuesser(nn.Module):
     def __init__(self):
         super(MultimodalGuesser, self).__init__()
         self.device = DEVICE
-
         # self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_text()
         self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_text()
         # self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_no_text()
@@ -158,6 +160,8 @@ class MultimodalGuesser(nn.Module):
         self.text_model = AutoModel.from_pretrained("emilyalsentzer/Bio_ClinicalBERT").to(self.device)
         self.tokenizer = AutoTokenizer.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
         self.img_embedder = ImageEmbedder()
+        # self.nlp = spacy.load("en_core_sci_sm")
+        # self.text_reducer = nn.Linear(96, FLAGS.reduced_dim).to(self.device)
         self.text_reducer = nn.Linear(FLAGS.text_embed_dim, FLAGS.reduced_dim).to(self.device)
         self.text_reduced_dim = FLAGS.reduced_dim
         self.num_classes = len(np.unique(self.y))
@@ -215,7 +219,7 @@ class MultimodalGuesser(nn.Module):
         summary = self.tokenizer_summarize_text_model.decode(summary_ids[0], skip_special_tokens=True)
         return summary
 
-    def embed_text_with_clinicalbert(self, text):
+    def embed_text(self, text):
         """
         Embeds text using ClinicalBERT.
 
@@ -265,6 +269,12 @@ class MultimodalGuesser(nn.Module):
             else:
                 return False
 
+    def text_to_vec(self, text):
+        summary = self.summarize_text(text)
+        doc = self.nlp(summary)
+        vec = doc.vector
+        return F.relu(self.text_reducer(torch.tensor(vec).to(self.device)))
+
     def forward(self, input, mask=None):
         sample_embeddings = []
         for col_index, feature in enumerate(input):  # Use enumerate for indexing
@@ -273,10 +283,12 @@ class MultimodalGuesser(nn.Module):
                 feature_embed = self.embed_image(feature)
             elif self.is_text_value(feature):
                 # Handle text: assume feature is text and process it
-                feature_embed = self.embed_text_with_clinicalbert(feature)
+                # feature_embed = self.text_to_vec(feature).unsqueeze(0)
+                feature_embed = self.embed_text(feature)
             elif pd.isna(feature):
                 # Handle NaN: get the size for the current column
                 size = len(self.map_feature.get(col_index, []))  # Use column index
+                # size = len(self.guesser.map_feature[feature])
                 feature_embed = torch.zeros((1, size), dtype=torch.float32, device=DEVICE)
             elif self.is_numeric_value(feature):
                 # Handle numeric: directly convert to tensor
@@ -322,23 +334,22 @@ def create_mask(model) -> np.array:
     return binary_mask
 
 
-
-
-
-
-
 def create_adverserial_input(sample, label, pretrained_model):
     sample_embeddings = []
-    for feature in sample:
+    for col_index, feature in enumerate(sample):
         if pretrained_model.is_image_value(feature):
             # Handle image path: assume feature is a path and process it
             feature_embed = pretrained_model.embed_image(feature)
         elif pretrained_model.is_text_value(feature):
             # Handle text: assume feature is text and process it
-            feature_embed = pretrained_model.embed_text_with_clinicalbert(feature)
+            # feature_embed = pretrained_model.text_to_vec(feature).unsqueeze(0)
+            feature_embed = pretrained_model.embed_text(feature)
         elif pd.isna(feature):
-            feature_embed = torch.tensor([0] * pretrained_model.text_reduced_dim, dtype=torch.float32).unsqueeze(0).to(
-                pretrained_model.device)
+            # size = len(pretrained_model.guesser.map_feature[feature])
+            size = len(pretrained_model.map_feature.get(col_index, []))  # Use column index
+            feature_embed = torch.zeros((1, size), dtype=torch.float32, device=DEVICE)
+            # feature_embed = torch.tensor([0] * pretrained_model.text_reduced_dim, dtype=torch.float32).unsqueeze(0).to(
+            #     pretrained_model.device)
         elif pretrained_model.is_numeric_value(feature):
             # Handle numeric: directly convert to tensor
             feature_embed = torch.tensor([feature], dtype=torch.float32).unsqueeze(0).to(pretrained_model.device)
@@ -382,7 +393,6 @@ def create_adverserial_input(sample, label, pretrained_model):
                 binary_mask[i] = 0
 
     return binary_mask
-
 
 
 def plot_running_loss(loss_list):
@@ -540,8 +550,8 @@ def main():
     model.to(model.device)
     X_train, X_test, y_train, y_test = train_test_split(model.X,
                                                         model.y,
-                                                        test_size=0.05,
-                                                        random_state=42)
+                                                        test_size=0.1,
+                                                        random_state=24)
 
     X_train, X_val, y_train, y_val = train_test_split(X_train,
                                                       y_train,

@@ -1,6 +1,5 @@
 import csv
 import os
-
 from scipy.io import loadmat
 from sklearn.preprocessing import StandardScaler
 from ucimlrepo import fetch_ucirepo
@@ -136,9 +135,16 @@ def load_mimic_time_series():
 
 
 def clean_mimic_data_nan(X):
-    # drop columns where there are nan in more than 50% of the rows
-    X = X.dropna(axis=1, thresh=int(0.5 * X.shape[0]))
+    # Drop columns where more than 10% of the rows have NaN values
+    X = X.dropna(axis=1, thresh=int(0.2 * X.shape[0]))  # Keep columns with at least 90% non-NaN values
     return X
+
+
+def reduce_number_of_samples(X, Y):
+    # reduce the number of samples to 1000
+    X = X[:1000]
+    Y = Y[:1000]
+    return X, Y
 
 
 def load_mimic_text():
@@ -153,8 +159,9 @@ def load_mimic_text():
     # balance classes no noise
     X, Y = balance_class_no_noise(df.to_numpy(), Y)
     X = pd.DataFrame(X)
-    map_test = map_multiple_features(X.iloc[0])
     X = clean_mimic_data_nan(X)
+    map_test = map_multiple_features(X.iloc[0])
+    # X,Y = reduce_number_of_samples(X,Y)
     return X, Y, len(X.columns), map_test
 
 

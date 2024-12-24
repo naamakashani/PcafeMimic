@@ -1,7 +1,6 @@
 import shutil
 import torch.nn
 from typing import List, Tuple
-from matplotlib import pyplot as plt
 from env_robust import *
 from agent import *
 from PrioritiziedReplayMemory import *
@@ -24,7 +23,7 @@ parser.add_argument("--save_dir",
                     help="Directory for saved models")
 parser.add_argument("--save_guesser_dir",
                     type=str,
-                    default='model_robust_embedder_guesser',
+                    default='guesser_multi',
                     help="Directory for saved guesser model")
 parser.add_argument("--gamma",
                     type=float,
@@ -82,15 +81,15 @@ parser.add_argument("--lr_decay_factor",
 #change these parameters
 parser.add_argument("--val_interval",
                     type=int,
-                    default=10,
+                    default=100,
                     help="Interval for calculating validation reward and saving model")
 parser.add_argument("--val_trials_wo_im",
                     type=int,
-                    default=6,
+                    default=5,
                     help="Number of validation trials without improvement")
 parser.add_argument("--cost_budget",
                     type=int,
-                    default=40,
+                    default=17,
                     help="Number of validation trials without improvement")
 
 FLAGS = parser.parse_args(args=[])
@@ -165,6 +164,7 @@ def play_episode(env,
     sum_cost = 0
     while not done and sum_cost < env.cost_budget:
         a = agent.get_action(s, env, eps, mask, mode)
+        # a = agent.get_action_not_guess(s, env, eps, mask, mode)
         if sum_cost+env.cost_list[a] > env.cost_budget:
             a = agent.output_dim - 1
         next_state, r, done, info = env.step(a, mask)
@@ -416,7 +416,7 @@ def val(i_episode: int,
     y_hat_val = np.zeros(len(env.y_val))
     y_hat_probs = np.zeros(len(env.y_val))
     cost_list = []
-    start_time = time.time()
+
     for i in range(len(env.X_val)):
         state = env.reset(mode='val',
                           patient=i,
@@ -425,6 +425,7 @@ def val(i_episode: int,
         t = 0
         done = False
         sum_cost = 0
+        start_time = time.time()
         while not done and sum_cost < env.cost_budget:
             # select action from policy
             if t == 0:
@@ -452,9 +453,9 @@ def val(i_episode: int,
             y_hat_probs[i] = env.prob_classes
 
         cost_list.append(sum_cost)
-
-    end_time = time.time()
-    print(f"Validation time: {end_time - start_time}")
+        end_time = time.time()
+        execution_time = (end_time - start_time)
+        # print(f"Execution time: {execution_time:.6f} seconds")
 
     auc_roc = roc_auc_score(env.y_val, y_hat_probs)
     print(f"AUC-ROC: {auc_roc}")
@@ -475,8 +476,10 @@ def val(i_episode: int,
 
 
 def run(cost_budget):
+
     if os.path.exists(FLAGS.save_dir):
         shutil.rmtree(FLAGS.save_dir)
+
     env = myEnv(flags=FLAGS,
                 device=device,cost_budget=cost_budget)
     input_dim, output_dim = get_env_dim(env)
@@ -497,6 +500,8 @@ def run(cost_budget):
     rewards_list = []
     train_dqn = True
     train_guesser = False
+
+
 
     while val_trials_without_improvement < FLAGS.val_trials_wo_im:
         eps = epsilon_annealing(FLAGS.initial_epsilon, FLAGS.min_epsilon, FLAGS.anneal_steps, i)
@@ -525,6 +530,7 @@ def run(cost_budget):
         if i % FLAGS.n_update_target_dqn == 0:
             agent.update_target_dqn()
         i += 1
+
     acc, intersect, unoin, steps = test(env, agent, state_dim, output_dim)
     # show_sample_paths(6, env, agent)
     return acc, i, intersect, unoin, steps

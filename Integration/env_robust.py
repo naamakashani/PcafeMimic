@@ -11,12 +11,12 @@ class myEnv(gymnasium.Env):
         self.guesser = MultimodalGuesser()
         self.device = device
         self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(self.guesser.X, self.guesser.y,
-                                                                                test_size=0.05, random_state=42)
+                                                                                test_size=0.1, random_state=42)
         self.X_train, self.X_val, self.y_train, self.y_val = train_test_split(self.X_train,
                                                                               self.y_train,
-                                                                               test_size=0.1, random_state=24)
-        self.cost_list= [1,2,6,1,1,1,1,7,1,1,2,7,2,2,1,1,7,1]
-        # self.cost_list = [1] * (self.guesser.tests_number + 1)
+                                                                              test_size=0.05, random_state=24)
+        # self.cost_list= [1,2,6,1,1,1,1,7,1,1,2,7,2,2,1,1,7,1]
+        self.cost_list = [1] * (self.guesser.tests_number + 1)
         self.prob_list = [cost / sum(self.cost_list) for cost in self.cost_list]
         self.cost_budget = cost_budget
         self.num_classes = self.guesser.num_classes
@@ -56,7 +56,9 @@ class myEnv(gymnasium.Env):
         """
         mask = torch.ones(self.guesser.tests_number + 1)
         mask = mask.to(device=self.device)
-
+        # for i in range(self.guesser.tests_number):
+        #     if random.random() < 0.8:
+        #         mask[i] = 0
         return mask
 
     def step(self,
@@ -120,7 +122,10 @@ class myEnv(gymnasium.Env):
                 elif self.is_image_value(answer):
                     answer_vec = self.guesser.embed_image(answer)
                 elif self.is_text_value(answer):
-                    answer_vec = self.guesser.embed_text([answer]).squeeze()
+                    answer_vec = self.guesser.embed_text(answer).squeeze()
+                else:
+                    size = len(self.guesser.map_feature[feature])
+                    answer_vec = [0] * size
 
                 map_index = self.guesser.map_feature[feature]
                 for count, index in enumerate(map_index):

@@ -135,8 +135,8 @@ def load_mimic_time_series():
 
 
 def clean_mimic_data_nan(X):
-    # Drop columns where more than 10% of the rows have NaN values
-    X = X.dropna(axis=1, thresh=int(0.2 * X.shape[0]))  # Keep columns with at least 90% non-NaN values
+    # Keeps columns with at least 20% non-missing values.
+    X = X.dropna(axis=1, thresh=int(0.2 * X.shape[0]))
     return X
 
 

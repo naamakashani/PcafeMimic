@@ -52,20 +52,19 @@ class myEnv(gymnasium.Env):
         return self.state, info
 
     def step(self, action, mode='training'):
-        # Loop until an unused action is selected
-        # check the type of action
+        # Convert action to scalar if needed
         if isinstance(action, torch.Tensor):
             action_number = int(action.item())
         else:
             action_number = action
 
-        while action_number in self.taken_actions:
-            print(f"Action {action} already taken. Choosing a new action.")
-            action, _ = self.model.predict(self.state, deterministic=True)
-            if isinstance(action, torch.Tensor):
-                action_number = int(action.item())
-            else:
-                action_number = action
+        # Filter actions to exclude already-taken ones
+        available_actions = [a for a in range(self.action_space.n) if a not in self.taken_actions]
+
+        if action_number not in available_actions:
+            print(f"Action {action_number} already taken. Choosing a new action.")
+            action_number = np.random.choice(available_actions)  # Randomly choose from available actions
+
         # Mark the action as taken
         self.taken_actions.add(action_number)
 

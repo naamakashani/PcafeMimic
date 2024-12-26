@@ -100,68 +100,69 @@ parser.add_argument("--device",
 FLAGS = parser.parse_args(args=[])
 
 
-
-
 # Define agent for PPO
 def PPO_agent():
     env = myEnv(flags=FLAGS)
     check_env(env)
     model = PPO("MlpPolicy", env, verbose=1)
-    model.learn(total_timesteps=10)
+    # model.learn(total_timesteps=100000)
     return model, env
+
 
 # Define agent for SAC
 def SAC_agent():
     env = myEnv(flags=FLAGS)
     check_env(env)
     model = SAC("MlpPolicy", env, verbose=1)
-    model.learn(total_timesteps=10)
+    model.learn(total_timesteps=100000)
     return model, env
+
 
 # Define agent for TD3
 def TD3_agent():
     env = myEnv(flags=FLAGS)
     check_env(env)
     model = TD3("MlpPolicy", env, verbose=1)
-    model.learn(total_timesteps=10)
+    model.learn(total_timesteps=100000)
     return model, env
+
 
 # Define agent for DQN
 def DQN_agent():
     env = myEnv(flags=FLAGS)
     check_env(env)
     model = DQN("MlpPolicy", env, verbose=1)
-    model.learn(total_timesteps=10)
+    model.learn(total_timesteps=100000)
     return model, env
+
 
 # Define agent for A2C
 def A2C_agent():
     env = myEnv(flags=FLAGS)
     check_env(env)
     model = A2C("MlpPolicy", env, verbose=1)
-    model.learn(total_timesteps=10)
+    model.learn(total_timesteps=100000)
     return model, env
 
 
-
-def test(env, model,agent) -> float:
+def test(env, model, agent) -> float:
     print('Running Test')
     y_hat_test = np.zeros(len(env.y_test))
     y_hat_probs = np.zeros(len(env.y_test))
     cost_list = []
     for i in range(len(env.X_test)):
-        state, _ = env.reset(mode='test', patient=i, train_guesser=False)
+        state, _ = env.reset(mode='test', patient=i)
         terminated = False
         sum_cost = 0
         while not terminated and sum_cost < env.cost_budget:
             # Select action from PPO model
             action, _states = model.predict(state, deterministic=True)
+            action = int(action.item())
             # If the selected action exceeds the cost budget, force the guess
             if sum_cost + env.cost_list[action] > env.cost_budget:
                 action = model.action_space.n - 1  # Assuming last action is "guess"
 
-            # Take the action
-            state, reward, terminated, nan, info = env.step(action, 'test')
+            state, reward, terminated, nan, info = env.step(torch.tensor([action]), 'test')
             # Handle guessing
             if info['guess'] != -1:
                 y_hat_test[i] = info['guess']
@@ -172,7 +173,7 @@ def test(env, model,agent) -> float:
         # Final guessing logic if not already guessed
         if info['guess'] == -1:
             action = model.action_space.n - 1  # Assuming last action is "guess"
-            state, reward, terminated, nan, info = env.step(action, 'test')
+            state, reward, terminated, nan, info = env.step(torch.tensor([action]), 'test')
             y_hat_test[i] = info['guess']
             y_hat_probs[i] = env.prob_classes
 
@@ -194,7 +195,6 @@ def main():
     test(env, model, 'DQN')
     model, env = A2C_agent()
     test(env, model, 'A2C')
-
 
 
 if __name__ == '__main__':

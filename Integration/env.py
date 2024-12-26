@@ -22,7 +22,6 @@ class myEnv(gymnasium.Env):
         self.device = flags.device
         self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(self.guesser.X, self.guesser.y,
                                                                                 test_size=0.1, random_state=42)
-        # self.cost_list= [1,2,6,1,1,1,1,7,1,1,2,7,2,2,1,1,7,1]
         self.cost_list = [1] * (self.guesser.tests_number + 1)
         self.prob_list = [cost / sum(self.cost_list) for cost in self.cost_list]
         self.cost_budget = flags.cost_budget
@@ -35,7 +34,7 @@ class myEnv(gymnasium.Env):
             guesser_state_dict = torch.load(guesser_load_path)
             self.guesser.load_state_dict(guesser_state_dict)
 
-    def reset(self, seed=None, mode='training', patient=0, train_guesser=True):
+    def reset(self, seed=None, mode='training', patient=0):
         super().reset(seed=seed)  # This ensures compatibility with Gym
         self.state = np.zeros(self.guesser.features_total, dtype=np.float32)
         if seed is not None:
@@ -47,18 +46,31 @@ class myEnv(gymnasium.Env):
 
         self.done = False
         self.total_cost = 0
-
-        if mode == 'training':
-            self.train_guesser = train_guesser
-        else:
-            self.train_guesser = False
+        self.taken_actions = set()  # Reset the set of taken actions
 
         info = {}  # Add any relevant environment information here
         return self.state, info
 
     def step(self, action, mode='training'):
-        next_state = self.update_state(action, mode)
-        self.total_cost += self.cost_list[action]
+        # Loop until an unused action is selected
+        # check the type of action
+        if isinstance(action, torch.Tensor):
+            action_number = int(action.item())
+        else:
+            action_number = action
+
+        while action_number in self.taken_actions:
+            print(f"Action {action} already taken. Choosing a new action.")
+            action, _ = self.model.predict(self.state, deterministic=True)
+            if isinstance(action, torch.Tensor):
+                action_number = int(action.item())
+            else:
+                action_number = action
+        # Mark the action as taken
+        self.taken_actions.add(action_number)
+
+        next_state = self.update_state(action_number, mode)
+        self.total_cost += self.cost_list[action_number]
         self.state = np.array(next_state)
         reward = self._compute_internal_reward(mode)
 
@@ -125,26 +137,8 @@ class myEnv(gymnasium.Env):
 
     def _compute_internal_reward(self, mode):
         """ Compute the reward """
-
         if mode == 'test':
             return None
-
-        if self.guess == -1:  # no guess was made
-            return self.reward
-
-        if mode == 'training':
-            y_true = self.y_train[self.patient]
-            if self.train_guesser:
-                self.guesser.optimizer.zero_grad()
-                self.guesser.train(mode=True)
-                y_tensor = torch.tensor([int(y_true)])
-                y_true_tensor = F.one_hot(y_tensor, num_classes=2).squeeze()
-                self.probs = self.probs.float()
-                y_true_tensor = y_true_tensor.float()
-                self.guesser.loss = self.guesser.criterion(self.probs, y_true_tensor)
-                self.guesser.loss.backward()
-                self.guesser.optimizer.step()
-
         return self.reward
 
     def is_numeric_value(self, value):

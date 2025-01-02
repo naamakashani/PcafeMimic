@@ -23,7 +23,7 @@ parser.add_argument("--save_dir",
                     help="Directory for saved models")
 parser.add_argument("--save_guesser_dir",
                     type=str,
-                    default='guesser_multi',
+                    default='guesser_text',
                     help="Directory for saved guesser model")
 parser.add_argument("--gamma",
                     type=float,
@@ -89,7 +89,7 @@ parser.add_argument("--val_trials_wo_im",
                     help="Number of validation trials without improvement")
 parser.add_argument("--cost_budget",
                     type=int,
-                    default=17,
+                    default=300,
                     help="Number of validation trials without improvement")
 
 FLAGS = parser.parse_args(args=[])

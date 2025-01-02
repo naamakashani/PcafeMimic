@@ -151,14 +151,19 @@ class MultimodalGuesser(nn.Module):
     def __init__(self):
         super(MultimodalGuesser, self).__init__()
         self.device = DEVICE
-        # self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_text()
         self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_text()
-        # self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_no_text()
+        #self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_time_series()
         self.summarize_text_model = BartForConditionalGeneration.from_pretrained("facebook/bart-large-cnn").to(
             self.device)
         self.tokenizer_summarize_text_model = BartTokenizer.from_pretrained("facebook/bart-large-cnn")
-        self.text_model = AutoModel.from_pretrained("emilyalsentzer/Bio_ClinicalBERT").to(self.device)
-        self.tokenizer = AutoTokenizer.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
+
+        # self.text_model = AutoModel.from_pretrained("emilyalsentzer/Bio_ClinicalBERT").to(self.device)
+        # self.tokenizer = AutoTokenizer.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
+
+        local_model_path = os.path.join(os.getcwd(), 'Integration/clinicalBert')
+        self.text_model = AutoModel.from_pretrained(local_model_path).to(self.device)
+        self.tokenizer = AutoTokenizer.from_pretrained(local_model_path)
+
         self.img_embedder = ImageEmbedder()
         # self.nlp = spacy.load("en_core_sci_sm")
         # self.text_reducer = nn.Linear(96, FLAGS.reduced_dim).to(self.device)
@@ -460,7 +465,7 @@ def train_model(model,
                 print('Did not achieve val AUC improvement for {} trials, training is done.'.format(
                     FLAGS.val_trials_wo_im))
                 break
-        print("finished " + str(j) + " out of " + str(nepochs) + " epochs")
+        # print("finished " + str(j) + " out of " + str(nepochs) + " epochs")
 
     plot_running_loss(loss_list)
 

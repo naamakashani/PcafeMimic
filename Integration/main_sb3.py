@@ -23,7 +23,7 @@ parser.add_argument("--save_dir",
                     help="Directory for saved models")
 parser.add_argument("--save_guesser_dir",
                     type=str,
-                    default='guesser_multi',
+                    default='model_robust_embedder_guesser',
                     help="Directory for saved guesser model")
 parser.add_argument("--gamma",
                     type=float,
@@ -89,7 +89,7 @@ parser.add_argument("--val_trials_wo_im",
                     help="Number of validation trials without improvement")
 parser.add_argument("--cost_budget",
                     type=int,
-                    default=36,
+                    default=17,
                     help="Number of validation trials without improvement")
 
 parser.add_argument("--device",
@@ -103,34 +103,23 @@ FLAGS = parser.parse_args(args=[])
 # Define agent for PPO
 def PPO_agent():
     env = myEnv(flags=FLAGS)
-    check_env(env)
     model = PPO("MlpPolicy", env, verbose=1)
-    model.learn(total_timesteps=1)
+    model.learn(total_timesteps=100000)
     return model, env
 
 
 # Define agent for SAC
 def SAC_agent():
     env = myEnv(flags=FLAGS)
-    check_env(env)
     model = SAC("MlpPolicy", env, verbose=1)
     model.learn(total_timesteps=100000)
     return model, env
 
 
-# Define agent for TD3
-def TD3_agent():
-    env = myEnv(flags=FLAGS)
-    check_env(env)
-    model = TD3("MlpPolicy", env, verbose=1)
-    model.learn(total_timesteps=100000)
-    return model, env
-
 
 # Define agent for DQN
 def DQN_agent():
     env = myEnv(flags=FLAGS)
-    check_env(env)
     model = DQN("MlpPolicy", env, verbose=1)
     model.learn(total_timesteps=100000)
     return model, env
@@ -139,8 +128,15 @@ def DQN_agent():
 # Define agent for A2C
 def A2C_agent():
     env = myEnv(flags=FLAGS)
-    check_env(env)
     model = A2C("MlpPolicy", env, verbose=1)
+    model.learn(total_timesteps=100000)
+    return model, env
+
+
+# Define agent for TD3
+def TD3_agent():
+    env = myEnv(flags=FLAGS)
+    model = TD3("MlpPolicy", env, verbose=1)
     model.learn(total_timesteps=100000)
     return model, env
 
@@ -178,23 +174,27 @@ def test(env, model, agent) -> float:
             y_hat_probs[i] = env.prob_classes
 
         cost_list.append(sum_cost)
-    # Calculate performance metrics
-    auc_roc = roc_auc_score(env.y_test, y_hat_probs)
-    print(f"AUC-ROC {agent}: {auc_roc}")
+    # calculate auc score
+    C = confusion_matrix(env.y_test, y_hat_test)
+    print(C)
+    acc = np.sum(np.diag(C)) / len(env.y_test)
+    print(f"Test accuracy:{agent}", np.round(acc, 3))
+    avg_cost = np.mean(cost_list)
+    print('Average cost: {:1.3f}'.format(avg_cost))
 
 
 def main():
     os.chdir(FLAGS.directory)
     model, env = PPO_agent()
     test(env, model, 'PPO')
-    model, env = SAC_agent()
-    test(env, model, 'SAC')
-    model, env = TD3_agent()
-    test(env, model, 'TD3')
     model, env = DQN_agent()
     test(env, model, 'DQN')
     model, env = A2C_agent()
     test(env, model, 'A2C')
+    # model, env = TD3_agent()
+    # test(env, model, 'TD3')
+    # model, env = SAC_agent()
+    # test(env, model, 'SAC')
 
 
 if __name__ == '__main__':

@@ -1,6 +1,5 @@
 import gymnasium
 from embedder_guesser import *
-import torch.nn.functional as F
 from gymnasium import spaces
 
 
@@ -21,7 +20,7 @@ class myEnv(gymnasium.Env):
 
         self.device = flags.device
         self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(self.guesser.X, self.guesser.y,
-                                                                                test_size=0.1, random_state=42)
+                                                                                test_size=0.05, random_state=42)
         self.cost_list = [1] * (self.guesser.tests_number + 1)
         self.prob_list = [cost / sum(self.cost_list) for cost in self.cost_list]
         self.cost_budget = flags.cost_budget
@@ -61,6 +60,13 @@ class myEnv(gymnasium.Env):
         # Filter actions to exclude already-taken ones
         available_actions = [a for a in range(self.action_space.n) if a not in self.taken_actions]
 
+        if not available_actions:  # Check if all actions are taken
+            print("All actions have been taken. Ending episode.")
+            terminated = True
+            reward = -1  # Optional: Penalize for exhausting all actions
+            info = {'guess': self.guess}
+            return self.state, reward, terminated, True, info
+
         if action_number not in available_actions:
             print(f"Action {action_number} already taken. Choosing a new action.")
             action_number = np.random.choice(available_actions)  # Randomly choose from available actions
@@ -73,10 +79,11 @@ class myEnv(gymnasium.Env):
         self.state = np.array(next_state)
         reward = self._compute_internal_reward(mode)
 
+        # Check if the episode should terminate
         terminated = self.total_cost >= self.guesser.tests_number or self.done  # Episode ends naturally
         info = {'guess': self.guess}
 
-        return self.state, reward, terminated, True, info
+        return self.state, reward, terminated, False, info  # Set 'truncated' to False if not relevant
 
     def prob_guesser(self, state):
         guesser_input = torch.Tensor(

@@ -161,7 +161,7 @@ def load_mimic_text():
     X = pd.DataFrame(X)
     X = clean_mimic_data_nan(X)
     map_test = map_multiple_features(X.iloc[0])
-    # X,Y = reduce_number_of_samples(X,Y)
+    #X,Y = reduce_number_of_samples(X,Y)
     return X, Y, len(X.columns), map_test
 
 

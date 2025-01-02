@@ -1,13 +1,14 @@
 import gymnasium
 from embedder_guesser import *
 import torch.nn.functional as F
-
-
+from gymnasium import spaces
+from sklearn.model_selection import train_test_split
 class myEnv(gymnasium.Env):
     def __init__(self,
                  flags,
                  device, cost_budget,
                  load_pretrained_guesser=True):
+
         self.guesser = MultimodalGuesser()
         self.device = device
         self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(self.guesser.X, self.guesser.y,
@@ -15,7 +16,6 @@ class myEnv(gymnasium.Env):
         self.X_train, self.X_val, self.y_train, self.y_val = train_test_split(self.X_train,
                                                                               self.y_train,
                                                                               test_size=0.05, random_state=24)
-        # self.cost_list= [1,2,6,1,1,1,1,7,1,1,2,7,2,2,1,1,7,1]
         self.cost_list = [1] * (self.guesser.tests_number + 1)
         self.prob_list = [cost / sum(self.cost_list) for cost in self.cost_list]
         self.cost_budget = cost_budget

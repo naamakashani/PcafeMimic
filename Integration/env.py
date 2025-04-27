@@ -21,7 +21,7 @@ class myEnv(gymnasium.Env):
         self.device = flags.device
         self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(self.guesser.X, self.guesser.y,
                                                                                 test_size=0.05, random_state=42)
-        self.cost_list = [1] * (self.guesser.tests_number + 1)
+        self.cost_list = [0] + [1] * (self.guesser.tests_number)
         self.prob_list = [cost / sum(self.cost_list) for cost in self.cost_list]
         self.cost_budget = flags.cost_budget
         self.num_classes = self.guesser.num_classes
@@ -33,17 +33,37 @@ class myEnv(gymnasium.Env):
             guesser_state_dict = torch.load(guesser_load_path)
             self.guesser.load_state_dict(guesser_state_dict)
 
-    def reset(self, seed=None, mode='training', patient=0):
-        super().reset(seed=seed)  # This ensures compatibility with Gym
-        self.state = np.zeros(self.guesser.features_total, dtype=np.float32)
-        if seed is not None:
-            np.random.seed(seed)
+    def reset(self,
+              mode='training',
+              patient=0,
+              train_guesser=True,
+              seed=None,
+              options=None):
+        self.state = np.concatenate([np.zeros(self.guesser.features_total)])
         if mode == 'training':
-            self.patient = np.random.randint(self.X_train.shape[0])
+            if isinstance(self.X_train, list):
+                self.patient = np.random.randint(len(self.X_train))
+            else:
+                self.patient = np.random.randint(self.X_train.shape[0])
         else:
             self.patient = patient
 
+        # reveal state places where cost is 0
+        for i in range(self.guesser.tests_number):
+            if self.cost_list[i] == 0:
+                if isinstance(self.X_train, list):
+                    self.state = self.update_state_for_time_series(i, mode)
+                else:
+                    self.state = self.update_state_basic(i, mode)
+
         self.done = False
+        self.s = np.array(self.state)
+        self.time = 0
+
+        if mode == 'training':
+            self.train_guesser = train_guesser
+        else:
+            self.train_guesser = False
         self.total_cost = 0
         self.taken_actions = set()  # Reset the set of taken actions
 
@@ -61,14 +81,12 @@ class myEnv(gymnasium.Env):
         available_actions = [a for a in range(self.action_space.n) if a not in self.taken_actions]
 
         if not available_actions:  # Check if all actions are taken
-            print("All actions have been taken. Ending episode.")
             terminated = True
             reward = -1  # Optional: Penalize for exhausting all actions
             info = {'guess': self.guess}
             return self.state, reward, terminated, True, info
 
         if action_number not in available_actions:
-            print(f"Action {action_number} already taken. Choosing a new action.")
             action_number = np.random.choice(available_actions)  # Randomly choose from available actions
 
         # Mark the action as taken
@@ -104,33 +122,66 @@ class myEnv(gymnasium.Env):
         self.guesser.train(mode=False)
         return self.guesser(guesser_input).squeeze()[1].item()
 
-    def update_state(self, action, mode):
-        prev_state = self.state
+    def update_state_for_time_series(self, action, mode):
         next_state = np.array(self.state)
-        if action < self.guesser.tests_number:  # Not making a guess
-            features_revealed = self.guesser.map_test[action]
-            for feature in features_revealed:
-                if mode == 'training':
-                    answer = self.X_train.iloc[self.patient, feature]
-                elif mode == 'test':
-                    answer = self.X_test.iloc[self.patient, feature]
-                # check type of feature
-                if self.is_numeric_value(answer):
-                    answer_vec = torch.tensor([answer], dtype=torch.float32).unsqueeze(0)
-                elif self.is_image_value(answer):
-                    answer_vec = self.guesser.embed_image(answer)
-                elif self.is_text_value(answer):
-                    answer_vec = self.guesser.embed_text(answer).squeeze()
-                else:
-                    size = len(self.guesser.map_feature[feature])
-                    answer_vec = [0] * size
+        input = self.X_train[self.patient]
+        if action != 0:
+            next_state[action + self.guesser.text_reduced_dim-1] = input.iloc[-1][
+                action-1]
+        else:
+            df_history = input.iloc[:-1]  # All rows except the last one
+            if df_history.shape[0] > 0:
+                x = torch.tensor(df_history.values, dtype=torch.float32, device=self.device).unsqueeze(0)
+                x = self.guesser.time_series_embedder(x).squeeze()
 
-                map_index = self.guesser.map_feature[feature]
-                for count, index in enumerate(map_index):
-                    next_state[index] = answer_vec[count]
+            else:
+                # If there's no history, append a zero vector instead
+                embed_dim = self.guesser.text_reduced_dim
+                x= torch.zeros((1, embed_dim), device=self.device).squeeze()
+            for i in range(len(x)):
+                next_state[i] = x[i]
+
+
+        return next_state
+
+
+    def update_state_basic(self, action, mode):
+        next_state = np.array(self.state)
+        features_revealed = self.guesser.map_test[action]
+        for feature in features_revealed:
+            if mode == 'training':
+                answer = self.X_train.iloc[self.patient, feature]
+            elif mode == 'test':
+                answer = self.X_test.iloc[self.patient, feature]
+            # check type of feature
+            if self.is_numeric_value(answer):
+                answer_vec = torch.tensor([answer], dtype=torch.float32).unsqueeze(0)
+            elif self.is_image_value(answer):
+                answer_vec = self.guesser.embed_image(answer)
+            elif self.is_text_value(answer):
+                answer_vec = self.guesser.embed_text(answer).squeeze()
+            else:
+                size = len(self.guesser.map_feature[feature])
+                answer_vec = [0] * size
+
+            map_index = self.guesser.map_feature[feature]
+            for count, index in enumerate(map_index):
+                next_state[index] = answer_vec[count]
+
+        return next_state
+
+
+    def update_state(self, action, mode):
+        prev_state = np.array(self.state)
+        if action < self.guesser.tests_number:  # Not making a guess
+            if isinstance(self.X_train, list):
+                next_state = self.update_state_for_time_series(action, mode)
+            else:
+                next_state = self.update_state_basic(action, mode)
 
             self.prob_classes = self.prob_guesser_for_positive(next_state)
-            self.reward = abs(self.prob_guesser(next_state) - self.prob_guesser(prev_state)) / self.cost_list[action]
+            self.reward = abs(self.prob_guesser(next_state) - self.prob_guesser(prev_state)) / (self.cost_list[
+                action]+1)
             self.guess = -1
             self.done = False
             return next_state
@@ -141,11 +192,13 @@ class myEnv(gymnasium.Env):
             self.done = True
             return prev_state
 
+
     def _compute_internal_reward(self, mode):
         """ Compute the reward """
         if mode == 'test':
             return None
         return self.reward
+
 
     def is_numeric_value(self, value):
         # Check if the value is an integer, a floating-point number, or a tensor of type float or double
@@ -156,12 +209,14 @@ class myEnv(gymnasium.Env):
                 return True
         return False
 
+
     def is_text_value(self, value):
         # Check if the value is a string
         if isinstance(value, str):
             return True
         else:
             return False
+
 
     def is_image_value(self, value):
         # check if value is path that ends with 'png' or 'jpg'

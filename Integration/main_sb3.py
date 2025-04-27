@@ -23,7 +23,7 @@ parser.add_argument("--save_dir",
                     help="Directory for saved models")
 parser.add_argument("--save_guesser_dir",
                     type=str,
-                    default='model_robust_embedder_guesser',
+                    default='guesser_eICU',
                     help="Directory for saved guesser model")
 parser.add_argument("--gamma",
                     type=float,
@@ -97,6 +97,7 @@ parser.add_argument("--device",
                     default=device,
                     help="Device for training")
 
+
 FLAGS = parser.parse_args(args=[])
 
 
@@ -111,7 +112,8 @@ def PPO_agent():
 # Define agent for SAC
 def SAC_agent():
     env = myEnv(flags=FLAGS)
-    model = SAC("MlpPolicy", env, verbose=1)
+    model = SACDiscrete("MlpPolicy", env, verbose=1)
+    # model = SAC("MlpPolicy", env, verbose=1)
     model.learn(total_timesteps=100000)
     return model, env
 
@@ -185,12 +187,12 @@ def test(env, model, agent) -> float:
 
 def main():
     os.chdir(FLAGS.directory)
-    model, env = PPO_agent()
-    test(env, model, 'PPO')
+    # model, env = PPO_agent()
+    # test(env, model, 'PPO')
     model, env = DQN_agent()
     test(env, model, 'DQN')
-    model, env = A2C_agent()
-    test(env, model, 'A2C')
+    # model, env = A2C_agent()
+    # test(env, model, 'A2C')
     # model, env = TD3_agent()
     # test(env, model, 'TD3')
     # model, env = SAC_agent()

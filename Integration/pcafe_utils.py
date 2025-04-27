@@ -8,6 +8,7 @@ from pathlib import Path
 from PIL import Image
 import numpy as np
 import pandas as pd
+from ts2vec import TS2Vec
 
 
 def add_noise(X, noise_std=0.01):
@@ -86,6 +87,24 @@ def map_multiple_features_for_logistic_mimic(sample):
         index_map[i] = list(range(i * 42, i * 42 + 42))
     return index_map
 
+def map_time_series(sample):
+    """
+    Map features to indices based on their type.
+    If any value in a column is a string, treat the column as text.
+    :param data: 2D array-like dataset (list of lists, numpy array, or pandas DataFrame)
+    :return: A dictionary mapping feature indices to lists of indices and the total number of features
+    """
+    index_map = {}
+    current_index = 0
+    for col_index in range(sample.shape[1]+1):
+            if col_index == 0:
+                index_map[col_index] = list(range(current_index, current_index + 20))
+                current_index += 20
+            else:
+                index_map[col_index] = [current_index]  # Numeric feature
+                current_index += 1
+    return index_map
+
 
 def load_mimiciii():
     file_path = r'C:\Users\kashann\PycharmProjects\mimic-code-extract\mimic-iii\notebooks\ipynb_example\filtered_data.csv'
@@ -147,12 +166,104 @@ def reduce_number_of_samples(X, Y):
     return X, Y
 
 
+def load_all_data():
+    path = r'C:\Users\kashann\PycharmProjects\P-CAFE\eICU\DATA_FULL.csv'
+    # Read the files
+    DATA = pd.read_csv(path)
+    # remove the first 2 columns
+    DATA = DATA.iloc[:, 2:]
+
+    # Y is the last column of DATA
+    Y = DATA.iloc[:, -1].to_numpy().reshape(-1)
+    # X is all columns except the last column
+    X = DATA.iloc[:, :-1]
+    # balance classes no noise
+    X, Y = balance_class_no_noise(X.to_numpy(), Y)
+    X = pd.DataFrame(X)
+    map_test = map_multiple_features(X.iloc[0])
+    return X, Y, 21, map_test
+
+
+def df_to_list(df):
+    grp_df = df.groupby('patientunitstayid')
+    df_arr = []
+
+    for idx, frame in grp_df:
+        # Sort the dataframe for each patient based on 'itemoffset'
+        sorted_frame = frame.sort_values(by='itemoffset', ascending=True)  # or True for ascending
+        df_arr.append(sorted_frame)
+
+    return df_arr
+
+
+def load_time_series():
+    base_dir = os.getcwd()
+    path = os.path.join(base_dir, 'input\\df_data.csv')
+    # read csv file from path
+    df_time_series = pd.read_csv(path)
+    df_time_series = df_to_list(df_time_series)
+    labels = []
+    patients = []
+    for df in df_time_series:
+        df = df.drop(df.columns[0:3], axis=1)
+        # Drop the last column (assuming it's the label)
+        labels.append(df.iloc[0, -1])
+        df = df.iloc[:, :-1]
+        df_history = df.iloc[:-1]  # all except last row
+
+        history_stats = df_history.agg(['mean', 'std', 'min', 'max']).values.flatten()
+        recent_values = df.iloc[[-1]].values.flatten()
+        embedding = np.concatenate([recent_values, history_stats])
+        patients.append(embedding)
+
+    X, Y = balance_class_no_noise(np.array(patients), np.array(labels).reshape(-1))
+    X = pd.DataFrame(X)
+    map_test = map_multiple_features(X.iloc[0])
+    return X, Y, len(X.columns), map_test
+
+
+
+def load_time_Series():
+    base_dir = os.getcwd()
+    path = os.path.join(base_dir, 'input\\df_data.csv')
+    # read csv file from path
+    df_time_series = pd.read_csv(path)
+    df_time_series = df_to_list(df_time_series)
+    labels = []
+    patients = []
+    for df in df_time_series:
+        df = df.drop(df.columns[0:3], axis=1)
+        # Drop the last column (assuming it's the label)
+        labels.append(df.iloc[0, -1])
+        df = df.iloc[:, :-1]
+        patients.append(df)
+    patients, labels = balance_class_no_noise_dfs(patients, labels)
+
+    map_test = map_time_series(patients[0])
+    return patients, labels, len(patients[0].columns) + 1, map_test
+
+
+def load_eICU():
+    # Construct file paths dynamically
+    path = r'C:\Users\kashann\PycharmProjects\P-CAFE\eICU\DATA.csv'
+    # Read the files
+    DATA = pd.read_csv(path)
+    Y = DATA['Labels']
+    X = DATA.drop(columns=['Labels'])
+    Y = Y.to_numpy().reshape(-1)
+    # balance classes no noise
+    X, Y = balance_class_no_noise(X.to_numpy(), Y)
+    X = pd.DataFrame(X)
+    map_test = map_multiple_features(X.iloc[0])
+    return X, Y, 60, map_test
+
+
 def load_mimic_text():
     base_dir = os.getcwd()
     # Construct file paths dynamically
     path = os.path.join(base_dir, 'input\\data_with_text.json')
     df = pd.read_json(path, lines=True)
-    df = df.drop(columns=['subject_id', 'hadm_id', 'icustay_id'])
+    df = df.drop(columns=['subject_id', 'hadm_id', 'icustay_id', 'los'])
     # define the label mortality_inhospital as Y and drop from df
     Y = df['mortality_inhospital'].to_numpy().reshape(-1)
     df = df.drop(columns=['mortality_inhospital'])
@@ -161,7 +272,7 @@ def load_mimic_text():
     X = pd.DataFrame(X)
     X = clean_mimic_data_nan(X)
     map_test = map_multiple_features(X.iloc[0])
-    #X,Y = reduce_number_of_samples(X,Y)
+    # X,Y = reduce_number_of_samples(X,Y)
     return X, Y, len(X.columns), map_test
 
 
@@ -177,7 +288,31 @@ def load_mimic_no_text():
     # balance classes no noise
     X, Y = balance_class_no_noise(df.to_numpy(), Y)
     X = pd.DataFrame(X)
-    return X, Y, len(X.columns), map_multiple_features(X.iloc[0])
+    map_test = map_multiple_features(X.iloc[0])
+    return X, Y, len(X.columns), map_test
+
+
+def load_mimic_only_text():
+    base_dir = os.getcwd()
+    # Construct file paths dynamically
+    path = os.path.join(base_dir, 'input\\data_with_text.json')
+    df = pd.read_json(path, lines=True)
+    df = df.drop(columns=['subject_id', 'hadm_id', 'icustay_id'])
+    # define the label mortality_inhospital as Y and drop from df
+    Y = df['mortality_inhospital'].to_numpy().reshape(-1)
+    df = df.drop(columns=['mortality_inhospital'])
+    # balance classes no noise
+    X, Y = balance_class_no_noise(df.to_numpy(), Y)
+    X = pd.DataFrame(X)
+    # keep only the text columns
+    X = clean_mimic_data_nan(X)
+    # take only str columns
+    X = X.iloc[:, [3, 4, 5]]
+    # print how many nan values in each column
+    # nan_percentage = (X.isna().sum() / len(X)) * 100
+    # print(nan_percentage)
+    map_test = map_multiple_features(X.iloc[0])
+    return X, Y, len(X.columns), map_test
 
 
 def load_text_data():
@@ -681,6 +816,45 @@ def split_XTY_by_Text_appearence(X, T, Y):
 
     return X_non_empty_text, T_non_empty_text, Y_non_empty_text
 
+
+def balance_class_no_noise_dfs(patients, labels):
+    """
+    Balance classes by duplicating minority class patient time series (no noise added).
+
+    Parameters:
+    - patients: List of pandas DataFrames (one per patient).
+    - labels: List or array of labels.
+
+    Returns:
+    - patients_balanced: List of balanced DataFrames.
+    - labels_balanced: Balanced label list.
+    """
+    from collections import Counter
+    import numpy as np
+
+    # Count class instances
+    class_counts = Counter(labels)
+    unique_classes = list(class_counts.keys())
+    majority_class = max(class_counts, key=class_counts.get)
+    minority_class = min(class_counts, key=class_counts.get)
+
+    # Indices of each class
+    majority_indices = [i for i, y in enumerate(labels) if y == majority_class]
+    minority_indices = [i for i, y in enumerate(labels) if y == minority_class]
+
+    # Determine how many more samples are needed
+    diff = len(majority_indices) - len(minority_indices)
+
+    if diff > 0:
+        # Randomly sample with replacement from the minority class
+        sampled_indices = np.random.choice(minority_indices, diff, replace=True)
+        patients_balanced = patients + [patients[i].copy() for i in sampled_indices]
+        labels_balanced = labels + [labels[i] for i in sampled_indices]
+    else:
+        patients_balanced = patients.copy()
+        labels_balanced = labels.copy()
+
+    return patients_balanced, labels_balanced
 
 def balance_class_no_noise(X, y):
     """

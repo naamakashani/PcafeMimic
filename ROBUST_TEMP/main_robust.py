@@ -6,7 +6,8 @@ from agent import *
 from PrioritiziedReplayMemory import *
 from sklearn.metrics import roc_auc_score, average_precision_score
 import time
-with open(r'C:\Users\kashann\PycharmProjects\PCAFE-MIMIC\Integration\user_config_naama.json', 'r') as f:
+
+with open(r'/Integration/user_config_naama.json', 'r') as f:
     config = json.load(f)
 
 # Get the project path from the JSON
@@ -23,7 +24,7 @@ parser.add_argument("--save_dir",
                     help="Directory for saved models")
 parser.add_argument("--save_guesser_dir",
                     type=str,
-                    default='guesser_text',
+                    default='guesser_eICU',
                     help="Directory for saved guesser model")
 parser.add_argument("--gamma",
                     type=float,
@@ -78,14 +79,14 @@ parser.add_argument("--lr_decay_factor",
                     default=0.1,
                     help="LR decay factor")
 
-#change these parameters
+# change these parameters
 parser.add_argument("--val_interval",
                     type=int,
-                    default=100,
+                    default=30,
                     help="Interval for calculating validation reward and saving model")
 parser.add_argument("--val_trials_wo_im",
                     type=int,
-                    default=5,
+                    default=3,
                     help="Number of validation trials without improvement")
 parser.add_argument("--cost_budget",
                     type=int,
@@ -141,11 +142,11 @@ def calculate_td_error(state, action, reward, next_state, done, agent, gamma):
 
 
 def play_episode(env,
-                 agent: Agent,priorityRM: PrioritizedReplayMemory,
+                 agent: Agent, priorityRM: PrioritizedReplayMemory,
                  eps: float,
                  batch_size: int,
                  train_guesser=True,
-                 train_dqn=True, mode='training') -> int:
+                 train_dqn=True, mode='training', percent=0) -> int:
     """Play an epsiode and train
     Args:
         env (gym.Env): gym environment (CartPole-v0)
@@ -159,13 +160,13 @@ def play_episode(env,
     s = env.reset(train_guesser=train_guesser)
     done = False
     total_reward = 0
-    mask = env.reset_mask()
+    mask = env.reset_mask(percent)
     t = 0
     sum_cost = 0
     while not done and sum_cost < env.cost_budget:
         a = agent.get_action(s, env, eps, mask, mode)
         # a = agent.get_action_not_guess(s, env, eps, mask, mode)
-        if sum_cost+env.cost_list[a] > env.cost_budget:
+        if sum_cost + env.cost_list[a] > env.cost_budget:
             a = agent.output_dim - 1
         next_state, r, done, info = env.step(a, mask)
         mask[a] = 0
@@ -321,7 +322,7 @@ def save_plot_step_epoch(steps):
     plt.show()
 
 
-def test(env, agent, state_dim, output_dim):
+def test(env, agent, state_dim, output_dim, percent):
     total_steps = 0
     mask_list = []
     cost_list = []
@@ -332,10 +333,11 @@ def test(env, agent, state_dim, output_dim):
     n_test = len(env.X_test)
 
     for i in range(n_test):
+        print("new patient\n")
         state = env.reset(mode='test',
                           patient=i,
                           train_guesser=False)
-        mask = env.reset_mask()
+        mask = env.reset_mask(percent)
         t = 0
         done = False
         sum_cost = 0
@@ -347,6 +349,7 @@ def test(env, agent, state_dim, output_dim):
             if sum_cost + env.cost_list[action] > env.cost_budget:
                 action = agent.output_dim - 1
             mask[action] = 0
+            print(f"Feature number :{action}\n")
             # take the action
             state, reward, done, guess = env.step(action, mask, mode='test')
             if guess != -1:
@@ -386,7 +389,6 @@ def test(env, agent, state_dim, output_dim):
     return acc, intersect, union, steps
 
 
-
 def check_intersecion_union(mask_list):
     # Convert the list of tensors to a 2D tensor
     selected_features_tensor = torch.stack(mask_list)
@@ -409,19 +411,18 @@ def check_intersecion_union(mask_list):
 
 
 def val(i_episode: int,
-        best_val_acc: float, env, agent) -> float:
+        best_val_acc: float, env, agent, percent) -> float:
     """ Compute performance on validation set and save current models """
-
     print('Running validation')
     y_hat_val = np.zeros(len(env.y_val))
     y_hat_probs = np.zeros(len(env.y_val))
     cost_list = []
-
     for i in range(len(env.X_val)):
+        print("new patient\n")
         state = env.reset(mode='val',
                           patient=i,
                           train_guesser=False)
-        mask = env.reset_mask()
+        mask = env.reset_mask(percent)
         t = 0
         done = False
         sum_cost = 0
@@ -434,7 +435,7 @@ def val(i_episode: int,
                 action = agent.get_action(state, env, eps=0, mask=mask, mode='val')
             if sum_cost + env.cost_list[action] > env.cost_budget:
                 action = agent.output_dim - 1
-
+            print(f"Feature number :{action}\n")
             mask[action] = 0
             # take the action
             state, reward, done, guess = env.step(action, mask, mode='val')
@@ -475,15 +476,14 @@ def val(i_episode: int,
     return acc
 
 
-def run(cost_budget):
-
+def run(cost_budget, percent=0):
     if os.path.exists(FLAGS.save_dir):
         shutil.rmtree(FLAGS.save_dir)
 
     env = myEnv(flags=FLAGS,
-                device=device,cost_budget=cost_budget)
+                device=device, cost_budget=cost_budget)
     input_dim, output_dim = get_env_dim(env)
-    state_dim= env.guesser.features_total
+    state_dim = env.guesser.features_total
     agent = Agent(state_dim,
                   output_dim,
                   FLAGS.hidden_dim, FLAGS.lr, FLAGS.weight_decay)
@@ -501,8 +501,6 @@ def run(cost_budget):
     train_dqn = True
     train_guesser = False
 
-
-
     while val_trials_without_improvement < FLAGS.val_trials_wo_im:
         eps = epsilon_annealing(FLAGS.initial_epsilon, FLAGS.min_epsilon, FLAGS.anneal_steps, i)
         # play an episode
@@ -512,12 +510,12 @@ def run(cost_budget):
                                  eps,
                                  FLAGS.batch_size,
                                  train_dqn=train_dqn,
-                                 train_guesser=train_guesser, mode='training')
+                                 train_guesser=train_guesser, mode='training', percent=percent)
         rewards_list.append(reward)
         if i % FLAGS.val_interval == 0 and i > 50:
             # compute performance on validation set
             new_best_val_acc = val(i_episode=i,
-                                   best_val_acc=best_val_acc, env=env, agent=agent)
+                                   best_val_acc=best_val_acc, env=env, agent=agent, percent=percent)
             val_list.append(new_best_val_acc)
 
             # update best result on validation set and counter
@@ -531,64 +529,19 @@ def run(cost_budget):
             agent.update_target_dqn()
         i += 1
 
-    acc, intersect, unoin, steps = test(env, agent, state_dim, output_dim)
-    # show_sample_paths(6, env, agent)
+    acc, intersect, unoin, steps = test(env, agent, state_dim, output_dim, percent)
     return acc, i, intersect, unoin, steps
+
 
 def main():
     os.chdir(FLAGS.directory)
     acc, epochs, intersect, union, steps = run(FLAGS.cost_budget)
-
-
-
-# def show_sample_paths(n_patients, env, agent):
-#     """A method to run episodes on randomly chosen positive and negative test patients, and print trajectories to console  """
-#     print('Loading best networks')
-#     input_dim, output_dim = get_env_dim(env)
-#     env.guesser, agent.dqn = load_networks(i_episode='best', env=env, state_dim=env.guesser.features_total, output_dim=output_dim)
-#     for i in range(n_patients):
-#         print('Starting new episode with a new test patient')
-#         idx = np.random.randint(0, len(env.X_test))
-#         state = env.reset(mode='test',
-#                           patient=idx,
-#                           train_guesser=False)
-#
-#         mask = env.reset_mask()
-#
-#         # run episode
-#         for t in range(int(env.episode_length)):
-#             action = agent.get_action(state, env, eps=0, mask=mask, mode='test')
-#             mask[action] = 0
-#             if action != env.guesser.features_size:
-#                 print('Step: {}, Question: '.format(t + 1), env.guesser.question_names[action], ', Answer: ',
-#                       env.X_test[idx, action])
-#             # take the action
-#             state, reward, done, guess = env.step(action, mask, mode='test')
-#
-#             if guess != -1:
-#                 print('Step: {}, Ready to make a guess: Prob({})={:1.3f}, Guess: y={}, Ground truth: {}'.format(t + 1,
-#                                                                                                                 guess,
-#                                                                                                                 env.probs[
-#                                                                                                                     guess],
-#                                                                                                                 guess,
-#                                                                                                                 env.y_test[
-#                                                                                                                     idx]))
-#
-#                 break
-#
-#         if guess == -1:
-#             state, reward, done, guess = env.step(agent.output_dim - 1, mask, mode='test')
-#             print('Step: {}, Ready to make a guess: Prob({})={:1.3f}, Guess: y={}, Ground truth: {}'.format(t + 1,
-#                                                                                                             guess,
-#                                                                                                             env.probs[
-#                                                                                                                 guess],
-#                                                                                                             guess,
-#                                                                                                             env.y_test[
-#                                                                                                                 idx]))
-
+    # percentages = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+    # for percent in percentages:
+    #     print(f"Cost budget: {FLAGS.cost_budget}, Percent: {percent}")
+    #     acc, epochs, intersect, union, steps = run(FLAGS.cost_budget, percent)
 
 
 if __name__ == '__main__':
     os.chdir(FLAGS.directory)
     main()
-

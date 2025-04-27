@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import torchvision.transforms as transforms
 from PIL import Image
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import confusion_matrix, roc_auc_score, precision_recall_curve, auc
 from sklearn.model_selection import train_test_split
 from transformers import AutoModel, AutoTokenizer, \
     BartForConditionalGeneration, BartTokenizer
@@ -33,10 +33,6 @@ parser.add_argument("--directory",
                     type=str,
                     default=project_path,
                     help="Directory for saved models")
-parser.add_argument("--num_epochs",
-                    type=int,
-                    default=1000,
-                    help="number of epochs")
 parser.add_argument("--hidden-dim1",
                     type=int,
                     default=64,
@@ -54,17 +50,21 @@ parser.add_argument("--weight_decay",
                     default=0.001,
                     help="l_2 weight penalty")
 # change these parameters
+parser.add_argument("--num_epochs",
+                    type=int,
+                    default=100000,
+                    help="number of epochs")
 parser.add_argument("--val_trials_wo_im",
                     type=int,
-                    default=4,
+                    default=500,
                     help="Number of validation trials without improvement")
 parser.add_argument("--fraction_mask",
                     type=int,
-                    default=0.1,
+                    default=0,
                     help="fraction mask")
 parser.add_argument("--run_validation",
                     type=int,
-                    default=5,
+                    default=100,
                     help="after how many epochs to run validation")
 parser.add_argument("--batch_size",
                     type=int,
@@ -116,43 +116,60 @@ def map_features_to_indices(data):
     """
     index_map = {}
     current_index = 0
-    data = np.array(data)  # Ensure input is a NumPy array for easier handling
-
-    # Check each column to determine type (string/text or numeric)
-    for col_index in range(data.shape[1]):  # Iterate over columns
-        column_data = data[:, col_index]  # Extract the entire column
-
-        if any(isinstance(value, str) for value in column_data):  # Check for any string in the column
-            index_map[col_index] = list(range(current_index, current_index + 20))  # Text feature
-            current_index += 20
-        else:
-            index_map[col_index] = [current_index]  # Numeric feature
+    if isinstance(data[0], pd.DataFrame):
+        for col_index in range(data[0].shape[1] + 20):
+            index_map[col_index] = [current_index]
             current_index += 1
+
+
+    else:
+        data = np.array(data)  # Ensure input is a NumPy array for easier handling
+
+        # Check each column to determine type (string/text or numeric)
+        for col_index in range(data.shape[1]):  # Iterate over columns
+            column_data = data[:, col_index]  # Extract the entire column
+
+            if any(isinstance(value, str) for value in column_data):  # Check for any string in the column
+                index_map[col_index] = list(range(current_index, current_index + 20))  # Text feature
+                current_index += 20
+            else:
+                index_map[col_index] = [current_index]  # Numeric feature
+                current_index += 1
 
     return index_map, current_index
 
 
-def map_multiple_features_for_logistic_mimic(sample):
-    # map the index features that each test reveals
-    index_map = {}
-    for i in range(0, 17):
-        index_map[i] = list(range(i * 42, i * 42 + 42))
-    return index_map
+class LSTMEncoder(nn.Module):
+    def __init__(self, input_dim, hidden_dim, num_layers=1, bidirectional=False):
+        super(LSTMEncoder, self).__init__()
+        self.lstm = nn.LSTM(
+            input_size=input_dim,
+            hidden_size=hidden_dim,
+            num_layers=num_layers,
+            batch_first=True,
+            bidirectional=bidirectional
+        )
 
+        self.num_directions = 2 if bidirectional else 1
 
-def map_multiple_features(sample):
-    index_map = {}
-    for i in range(0, sample.shape[0]):
-        index_map[i] = [i]
-    return index_map
+    def forward(self, x):
+        # x: [batch_size, seq_len, input_dim]
+        _, (h_n, _) = self.lstm(x)  # h_n: [num_layers * num_directions, batch, hidden_dim]
+        # Take the last layer's output
+        h_last = h_n[-self.num_directions:]  # shape: [num_directions, batch, hidden_dim]
+        embedding = h_last.permute(1, 0, 2).reshape(x.size(0), -1)  # shape: [batch, hidden_dim * num_directions]
+        return embedding
 
 
 class MultimodalGuesser(nn.Module):
     def __init__(self):
         super(MultimodalGuesser, self).__init__()
         self.device = DEVICE
-        self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_text()
+        self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_time_Series()
+        #self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_text()
+        # self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_only_text()
         #self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_time_series()
+        # self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_no_text()
         self.summarize_text_model = BartForConditionalGeneration.from_pretrained("facebook/bart-large-cnn").to(
             self.device)
         self.tokenizer_summarize_text_model = BartTokenizer.from_pretrained("facebook/bart-large-cnn")
@@ -165,8 +182,8 @@ class MultimodalGuesser(nn.Module):
         self.tokenizer = AutoTokenizer.from_pretrained(local_model_path)
 
         self.img_embedder = ImageEmbedder()
-        # self.nlp = spacy.load("en_core_sci_sm")
-        # self.text_reducer = nn.Linear(96, FLAGS.reduced_dim).to(self.device)
+        if isinstance(self.X, list):
+            self.time_series_embedder = LSTMEncoder(self.X[0].shape[1], 20).to(self.device)
         self.text_reducer = nn.Linear(FLAGS.text_embed_dim, FLAGS.reduced_dim).to(self.device)
         self.text_reduced_dim = FLAGS.reduced_dim
         self.num_classes = len(np.unique(self.y))
@@ -191,7 +208,7 @@ class MultimodalGuesser(nn.Module):
         self.optimizer = torch.optim.Adam(self.parameters(),
                                           weight_decay=FLAGS.weight_decay,
                                           lr=FLAGS.lr)
-        self.path_to_save = os.path.join(os.getcwd(), 'model_robust_embedder_guesser')
+        self.path_to_save = os.path.join(os.getcwd(), 'guesser_eICU')
         self.layer1 = self.layer1.to(self.device)
         self.layer2 = self.layer2.to(self.device)
         self.layer3 = self.layer3.to(self.device)
@@ -274,6 +291,13 @@ class MultimodalGuesser(nn.Module):
             else:
                 return False
 
+    def is_time_series_value(self, value):
+        # Check if the value is a time series
+        if isinstance(value, pd.DataFrame):
+            return True
+        else:
+            return False
+
     def text_to_vec(self, text):
         summary = self.summarize_text(text)
         doc = self.nlp(summary)
@@ -282,24 +306,38 @@ class MultimodalGuesser(nn.Module):
 
     def forward(self, input, mask=None):
         sample_embeddings = []
-        for col_index, feature in enumerate(input):  # Use enumerate for indexing
-            if self.is_image_value(feature):
-                # Handle image path: assume feature is a path and process it
-                feature_embed = self.embed_image(feature)
-            elif self.is_text_value(feature):
-                # Handle text: assume feature is text and process it
-                # feature_embed = self.text_to_vec(feature).unsqueeze(0)
-                feature_embed = self.embed_text(feature)
-            elif pd.isna(feature):
-                # Handle NaN: get the size for the current column
-                size = len(self.map_feature.get(col_index, []))  # Use column index
-                # size = len(self.guesser.map_feature[feature])
-                feature_embed = torch.zeros((1, size), dtype=torch.float32, device=DEVICE)
-            elif self.is_numeric_value(feature):
-                # Handle numeric: directly convert to tensor
-                feature_embed = torch.tensor([[feature]], dtype=torch.float32, device=DEVICE)
 
-            sample_embeddings.append(feature_embed)
+        # Check if input is a time series (e.g., DataFrame)
+        if self.is_time_series_value(input):
+            df_history = input.iloc[:-1]  # All rows except the last one
+            if df_history.shape[0] > 0:
+                x = torch.tensor(df_history.values, dtype=torch.float32, device=self.device).unsqueeze(0)
+                x = self.time_series_embedder(x)
+                sample_embeddings.append(x)
+            else:
+                # If there's no history, append a zero vector instead
+                embed_dim = self.text_reduced_dim
+                sample_embeddings.append(torch.zeros((1, embed_dim), device=self.device))
+
+            recent_values = torch.tensor(input.iloc[-1].values, dtype=torch.float32, device=self.device).unsqueeze(0)
+            sample_embeddings.append(recent_values)
+
+        else:
+            # Handle non-time-series input (e.g., one row of a DataFrame or list of features)
+            for col_index, feature in enumerate(input):
+                if self.is_image_value(feature):
+                    feature_embed = self.embed_image(feature)
+                elif self.is_text_value(feature):
+                    feature_embed = self.embed_text(feature)
+                elif pd.isna(feature):
+                    size = len(self.map_feature.get(col_index, []))
+                    feature_embed = torch.zeros((1, size), dtype=torch.float32, device=self.device)
+                elif self.is_numeric_value(feature):
+                    feature_embed = torch.tensor([[feature]], dtype=torch.float32, device=self.device)
+                else:
+                    raise ValueError(f"Unsupported feature type: {feature}")
+
+                sample_embeddings.append(feature_embed)
 
         x = torch.cat(sample_embeddings, dim=1).to(DEVICE)
         if mask is not None:
@@ -310,8 +348,11 @@ class MultimodalGuesser(nn.Module):
         x = self.layer1(x)
         x = self.layer2(x)
         x = self.layer3(x)
+
+        # Final prediction head
         logits = self.logits(x).to(self.device)
 
+        # Compute softmax probabilities
         if logits.dim() == 2:
             probs = F.softmax(logits, dim=1)
         else:
@@ -338,64 +379,84 @@ def create_mask(model) -> np.array:
                 binary_mask[i] = 1
     return binary_mask
 
-
 def create_adverserial_input(sample, label, pretrained_model):
-    sample_embeddings = []
-    for col_index, feature in enumerate(sample):
-        if pretrained_model.is_image_value(feature):
-            # Handle image path: assume feature is a path and process it
-            feature_embed = pretrained_model.embed_image(feature)
-        elif pretrained_model.is_text_value(feature):
-            # Handle text: assume feature is text and process it
-            # feature_embed = pretrained_model.text_to_vec(feature).unsqueeze(0)
-            feature_embed = pretrained_model.embed_text(feature)
-        elif pd.isna(feature):
-            # size = len(pretrained_model.guesser.map_feature[feature])
-            size = len(pretrained_model.map_feature.get(col_index, []))  # Use column index
-            feature_embed = torch.zeros((1, size), dtype=torch.float32, device=DEVICE)
-            # feature_embed = torch.tensor([0] * pretrained_model.text_reduced_dim, dtype=torch.float32).unsqueeze(0).to(
-            #     pretrained_model.device)
-        elif pretrained_model.is_numeric_value(feature):
-            # Handle numeric: directly convert to tensor
-            feature_embed = torch.tensor([feature], dtype=torch.float32).unsqueeze(0).to(pretrained_model.device)
-        sample_embeddings.append(feature_embed)
-
-    input = torch.cat(sample_embeddings, dim=1)
-    input = input.squeeze(dim=1).to(DEVICE)
     pretrained_model.eval()
 
-    # Set requires_grad to True to calculate gradients with respect to input
-    input = input.detach().clone().requires_grad_(True)
-    x = pretrained_model.layer1(input)
-    x = pretrained_model.layer2(x)
+    # Convert the sample into a proper forward-pass input
+    if pretrained_model.is_time_series_value(sample):
+        # Handle time-series input (e.g., a DataFrame)
+        df_history = sample.iloc[:-1]
+        embeddings = []
 
-    logits = pretrained_model.logits(x).to(pretrained_model.device)
+        if df_history.shape[0] > 0:
+            x = torch.tensor(df_history.values, dtype=torch.float32, device=pretrained_model.device).unsqueeze(0)
+            x = pretrained_model.time_series_embedder(x)
+            embeddings.append(x)
+        else:
+            embed_dim = pretrained_model.text_reduced_dim
+            embeddings.append(torch.zeros((1, embed_dim), device=pretrained_model.device))
+
+        recent_values = torch.tensor(sample.iloc[-1].values, dtype=torch.float32, device=pretrained_model.device).unsqueeze(0)
+        embeddings.append(recent_values)
+
+        input_tensor = torch.cat(embeddings, dim=1).squeeze(0)  # shape: [dim]
+    else:
+        # Flat feature input (e.g., list or Series)
+        sample_embeddings = []
+        for col_index, feature in enumerate(sample):
+            if pretrained_model.is_image_value(feature):
+                feature_embed = pretrained_model.embed_image(feature)
+            elif pretrained_model.is_text_value(feature):
+                feature_embed = pretrained_model.embed_text(feature)
+            elif pd.isna(feature):
+                size = len(pretrained_model.map_feature.get(col_index, []))
+                feature_embed = torch.zeros((1, size), dtype=torch.float32, device=pretrained_model.device)
+            elif pretrained_model.is_numeric_value(feature):
+                feature_embed = torch.tensor([[feature]], dtype=torch.float32, device=pretrained_model.device)
+            else:
+                raise ValueError(f"Unsupported feature type: {feature}")
+            sample_embeddings.append(feature_embed)
+
+        input_tensor = torch.cat(sample_embeddings, dim=1).squeeze(0)
+
+    # Enable gradient tracking for adversarial attack
+    input_tensor = input_tensor.detach().clone().requires_grad_(True)
+
+    # Forward pass through model (excluding the final layer)
+    x = pretrained_model.layer1(input_tensor)
+    x = pretrained_model.layer2(x)
+    x = pretrained_model.layer3(x)
+    logits = pretrained_model.logits(x).squeeze(0)
+    # Compute softmax probabilities
     if logits.dim() == 2:
         probs = F.softmax(logits, dim=1)
     else:
         probs = F.softmax(logits, dim=-1)
-    # Calculate loss
-    loss = pretrained_model.criterion(probs, label)
 
-    # Backward pass to get gradients of the loss with respect to the input
+
+    loss = pretrained_model.criterion(probs.unsqueeze(0), label)
+
+    # Backward pass to compute gradients w.r.t. input
     loss.backward()
-    # Get the absolute value of the gradients
-    gradient = input.grad
+    gradient = input_tensor.grad
 
-    # Identify the most influential features (those with the largest absolute gradients).
+    # Get the most influential feature index
     absolute_gradients = torch.abs(gradient)
     max_gradients_index = torch.argmax(absolute_gradients, dim=-1).item()
 
+    # Map to original feature index
     for key, value in pretrained_model.map_feature.items():
         if max_gradients_index in value:
             max_gradients_index = key
             break
 
+    # Create binary mask that zeroes out most important feature
     binary_mask = np.ones(pretrained_model.features_total)
     for key, value in pretrained_model.map_feature.items():
         if key == max_gradients_index:
             for i in value:
                 binary_mask[i] = 0
+    pretrained_model.train()  # Set the model to training mode
 
     return binary_mask
 
@@ -416,8 +477,11 @@ def compute_probabilities(j, total_episodes):
 
 def train_model(model,
                 nepochs, X_train, y_train, X_val, y_val):
-    X_train = X_train.to_numpy()
-    X_val = X_val.to_numpy()
+    if isinstance(X_train,list):
+        pass
+    else:
+        X_train = X_train.to_numpy()
+        X_val = X_val.to_numpy()
     val_trials_without_improvement = 0
     best_val_auc = 0
     accuracy_list = []
@@ -491,50 +555,87 @@ def save_model(model):
 
 
 def val(model, X_val, y_val, best_val_auc=0):
-    # count time for this function
-    correct = 0
     model.eval()
-    num_samples = len(X_val)
+
+    correct = 0
+    y_true = []
+    y_pred = []
+    y_scores = []  # For probability scores for AUC
+
     with torch.no_grad():
-        for i in range(1, num_samples):
+        for i in range(len(X_val)):
             input = X_val[i]
-            label = torch.tensor(y_val[i], dtype=torch.long).to(DEVICE)
+            label = torch.tensor(y_val[i], dtype=torch.long).to(model.device)
             output = model(input)
+
             _, predicted = torch.max(output.data, 1)
             if predicted == label:
                 correct += 1
 
-    accuracy = correct / num_samples
+            y_true.append(label.item())
+            y_pred.append(predicted.item())
+            y_scores.append(torch.softmax(output, dim=1)[:, 1].item())
+
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+    y_scores = np.array(y_scores)
+
+    # Confusion matrix
+    conf_matrix = confusion_matrix(y_true, y_pred)
+    print("Validation Confusion Matrix:")
+    print(conf_matrix)
+
+    # Accuracy
+    accuracy = np.sum(np.diag(conf_matrix)) / np.sum(conf_matrix)
     print(f'Validation Accuracy: {accuracy:.2f}')
-    if accuracy >= best_val_auc:
+
+    # AUC-ROC
+    auc_roc = roc_auc_score(y_true, y_scores)
+    print(f'Validation AUC-ROC: {auc_roc:.2f}')
+
+    # AUC-PR
+    precision, recall, _ = precision_recall_curve(y_true, y_scores)
+    auc_pc = auc(recall, precision)
+    print(f'Validation AUC-PC: {auc_pc:.2f}')
+
+    if auc_roc >= best_val_auc:
         save_model(model)
+        best_val_auc = auc_roc
+
     return accuracy
 
 
+
+
 def test(model, X_test, y_test):
-    X_test = X_test.to_numpy()
     guesser_filename = 'best_guesser.pth'
     guesser_load_path = os.path.join(model.path_to_save, guesser_filename)
     guesser_state_dict = torch.load(guesser_load_path)
     model.load_state_dict(guesser_state_dict)
     model.eval()
+
     correct = 0
     y_true = []
     y_pred = []
+    y_scores = []  # For probability scores for AUC
+
     with torch.no_grad():
         for i in range(len(X_test)):
             input = X_test[i]
             label = torch.tensor(y_test[i], dtype=torch.long).to(model.device)
             output = model(input)
+
             _, predicted = torch.max(output.data, 1)
             if predicted == label:
                 correct += 1
 
             y_true.append(label.item())  # Assuming labels is a numpy array
             y_pred.append(predicted.item())
+            y_scores.append(torch.softmax(output, dim=1)[:, 1].item())  # Get the probability for class 1
 
     y_true = np.array(y_true)
     y_pred = np.array(y_pred)
+    y_scores = np.array(y_scores)
 
     # Calculate and print confusion matrix
     conf_matrix = confusion_matrix(y_true, y_pred)
@@ -544,6 +645,15 @@ def test(model, X_test, y_test):
     # Calculate accuracy
     accuracy = np.sum(np.diag(conf_matrix)) / np.sum(conf_matrix)
     print(f'Test Accuracy: {accuracy:.2f}')
+
+    # AUC-ROC
+    auc_roc = roc_auc_score(y_true, y_scores)
+    print(f'AUC-ROC: {auc_roc:.2f}')
+
+    # AUC-PC (Precision-Recall AUC)
+    precision, recall, _ = precision_recall_curve(y_true, y_scores)
+    auc_pc = auc(recall, precision)
+    print(f'AUC-PC: {auc_pc:.2f}')
 
 
 def main():

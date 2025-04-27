@@ -3,6 +3,8 @@ from embedder_guesser import *
 import torch.nn.functional as F
 from gymnasium import spaces
 from sklearn.model_selection import train_test_split
+
+
 class myEnv(gymnasium.Env):
     def __init__(self,
                  flags,
@@ -15,7 +17,7 @@ class myEnv(gymnasium.Env):
                                                                                 test_size=0.1, random_state=42)
         self.X_train, self.X_val, self.y_train, self.y_val = train_test_split(self.X_train,
                                                                               self.y_train,
-                                                                              test_size=0.05, random_state=24)
+                                                                              test_size=0.1, random_state=24)
         self.cost_list = [1] * (self.guesser.tests_number + 1)
         self.prob_list = [cost / sum(self.cost_list) for cost in self.cost_list]
         self.cost_budget = cost_budget
@@ -36,9 +38,38 @@ class myEnv(gymnasium.Env):
               train_guesser=True):
         self.state = np.concatenate([np.zeros(self.guesser.features_total)])
         if mode == 'training':
-            self.patient = np.random.randint(self.X_train.shape[0])
+            if isinstance(self.X_train, list):
+                self.patient = np.random.randint(len(self.X_train))
+            else:
+                self.patient = np.random.randint(self.X_train.shape[0])
         else:
             self.patient = patient
+
+        #reveal state places where cost is 0
+        for i in range(self.guesser.tests_number):
+            if self.cost_list[i]==0:
+                features_revealed = self.guesser.map_test[i]
+                for feature in features_revealed:
+                    if mode == 'training':
+                        answer = self.X_train.iloc[self.patient, feature]
+                    elif mode == 'val':
+                        answer = self.X_val.iloc[self.patient, feature]
+                    elif mode == 'test':
+                        answer = self.X_test.iloc[self.patient, feature]
+                    # check type of feature
+                    if self.is_numeric_value(answer):
+                        answer_vec = torch.tensor([answer], dtype=torch.float32).unsqueeze(0)
+                    elif self.is_image_value(answer):
+                        answer_vec = self.guesser.embed_image(answer)
+                    elif self.is_text_value(answer):
+                        answer_vec = self.guesser.embed_text(answer).squeeze()
+                    else:
+                        size = len(self.guesser.map_feature[feature])
+                        answer_vec = [0] * size
+
+                    map_index = self.guesser.map_feature[feature]
+                    for count, index in enumerate(map_index):
+                        self.state[index] = answer_vec[count]
 
         self.done = False
         self.s = np.array(self.state)
@@ -49,16 +80,19 @@ class myEnv(gymnasium.Env):
             self.train_guesser = False
         return self.s
 
-    def reset_mask(self):
+    def reset_mask(self, percent=0):
         """ A method that resets the mask that is applied
         to the q values, so that questions that were already
         asked will not be asked again.
         """
         mask = torch.ones(self.guesser.tests_number + 1)
         mask = mask.to(device=self.device)
-        # for i in range(self.guesser.tests_number):
-        #     if random.random() < 0.8:
-        #         mask[i] = 0
+        for i in range(self.guesser.tests_number):
+            if random.random() < percent:
+                mask[i] = 0
+        for i in range(self.guesser.tests_number):
+            if self.cost_list[i] == 0:
+                mask[i] = 0
         return mask
 
     def step(self,

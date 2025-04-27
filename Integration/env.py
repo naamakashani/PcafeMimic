@@ -21,11 +21,12 @@ class myEnv(gymnasium.Env):
         self.device = flags.device
         self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(self.guesser.X, self.guesser.y,
                                                                                 test_size=0.05, random_state=42)
-        self.cost_list = [0] + [1] * (self.guesser.tests_number)
+        self.cost_list = self.guesser.cost_list
+        self.cost_budget = self.guesser.cost_budget
         self.prob_list = [cost / sum(self.cost_list) for cost in self.cost_list]
-        self.cost_budget = flags.cost_budget
+
         self.num_classes = self.guesser.num_classes
-        save_dir = os.path.join(os.getcwd(), flags.save_guesser_dir)
+        save_dir = self.guesser.path_to_save
         guesser_filename = 'best_guesser.pth'
         guesser_load_path = os.path.join(save_dir, guesser_filename)
         if os.path.exists(guesser_load_path):
@@ -126,8 +127,8 @@ class myEnv(gymnasium.Env):
         next_state = np.array(self.state)
         input = self.X_train[self.patient]
         if action != 0:
-            next_state[action + self.guesser.text_reduced_dim-1] = input.iloc[-1][
-                action-1]
+            next_state[action + self.guesser.text_reduced_dim - 1] = input.iloc[-1][
+                action - 1]
         else:
             df_history = input.iloc[:-1]  # All rows except the last one
             if df_history.shape[0] > 0:
@@ -137,13 +138,11 @@ class myEnv(gymnasium.Env):
             else:
                 # If there's no history, append a zero vector instead
                 embed_dim = self.guesser.text_reduced_dim
-                x= torch.zeros((1, embed_dim), device=self.device).squeeze()
+                x = torch.zeros((1, embed_dim), device=self.device).squeeze()
             for i in range(len(x)):
                 next_state[i] = x[i]
 
-
         return next_state
-
 
     def update_state_basic(self, action, mode):
         next_state = np.array(self.state)
@@ -170,7 +169,6 @@ class myEnv(gymnasium.Env):
 
         return next_state
 
-
     def update_state(self, action, mode):
         prev_state = np.array(self.state)
         if action < self.guesser.tests_number:  # Not making a guess
@@ -181,7 +179,7 @@ class myEnv(gymnasium.Env):
 
             self.prob_classes = self.prob_guesser_for_positive(next_state)
             self.reward = abs(self.prob_guesser(next_state) - self.prob_guesser(prev_state)) / (self.cost_list[
-                action]+1)
+                                                                                                    action] + 1)
             self.guess = -1
             self.done = False
             return next_state
@@ -192,13 +190,11 @@ class myEnv(gymnasium.Env):
             self.done = True
             return prev_state
 
-
     def _compute_internal_reward(self, mode):
         """ Compute the reward """
         if mode == 'test':
             return None
         return self.reward
-
 
     def is_numeric_value(self, value):
         # Check if the value is an integer, a floating-point number, or a tensor of type float or double
@@ -209,14 +205,12 @@ class myEnv(gymnasium.Env):
                 return True
         return False
 
-
     def is_text_value(self, value):
         # Check if the value is a string
         if isinstance(value, str):
             return True
         else:
             return False
-
 
     def is_image_value(self, value):
         # check if value is path that ends with 'png' or 'jpg'

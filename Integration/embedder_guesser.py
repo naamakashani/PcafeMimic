@@ -166,9 +166,9 @@ class MultimodalGuesser(nn.Module):
         super(MultimodalGuesser, self).__init__()
         self.device = DEVICE
         self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_time_Series()
-        #self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_text()
+        # self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_text()
         # self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_only_text()
-        #self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_time_series()
+        # self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_time_series()
         # self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_no_text()
         self.summarize_text_model = BartForConditionalGeneration.from_pretrained("facebook/bart-large-cnn").to(
             self.device)
@@ -180,6 +180,10 @@ class MultimodalGuesser(nn.Module):
         local_model_path = os.path.join(os.getcwd(), 'Integration/clinicalBert')
         self.text_model = AutoModel.from_pretrained(local_model_path).to(self.device)
         self.tokenizer = AutoTokenizer.from_pretrained(local_model_path)
+        self.cost_list = [1] * (self.tests_number + 1)
+        if isinstance(self.X, list):
+            self.cost_list = [0] + [1] * (self.tests_number)
+        self.cost_budget = sum(self.cost_list)
 
         self.img_embedder = ImageEmbedder()
         if isinstance(self.X, list):
@@ -379,6 +383,7 @@ def create_mask(model) -> np.array:
                 binary_mask[i] = 1
     return binary_mask
 
+
 def create_adverserial_input(sample, label, pretrained_model):
     pretrained_model.eval()
 
@@ -396,7 +401,8 @@ def create_adverserial_input(sample, label, pretrained_model):
             embed_dim = pretrained_model.text_reduced_dim
             embeddings.append(torch.zeros((1, embed_dim), device=pretrained_model.device))
 
-        recent_values = torch.tensor(sample.iloc[-1].values, dtype=torch.float32, device=pretrained_model.device).unsqueeze(0)
+        recent_values = torch.tensor(sample.iloc[-1].values, dtype=torch.float32,
+                                     device=pretrained_model.device).unsqueeze(0)
         embeddings.append(recent_values)
 
         input_tensor = torch.cat(embeddings, dim=1).squeeze(0)  # shape: [dim]
@@ -432,7 +438,6 @@ def create_adverserial_input(sample, label, pretrained_model):
         probs = F.softmax(logits, dim=1)
     else:
         probs = F.softmax(logits, dim=-1)
-
 
     loss = pretrained_model.criterion(probs.unsqueeze(0), label)
 
@@ -477,7 +482,7 @@ def compute_probabilities(j, total_episodes):
 
 def train_model(model,
                 nepochs, X_train, y_train, X_val, y_val):
-    if isinstance(X_train,list):
+    if isinstance(X_train, list):
         pass
     else:
         X_train = X_train.to_numpy()
@@ -603,8 +608,6 @@ def val(model, X_val, y_val, best_val_auc=0):
         best_val_auc = auc_roc
 
     return accuracy
-
-
 
 
 def test(model, X_test, y_test):

@@ -21,10 +21,6 @@ parser.add_argument("--save_dir",
                     type=str,
                     default='ddqn_robust_models',
                     help="Directory for saved models")
-parser.add_argument("--save_guesser_dir",
-                    type=str,
-                    default='guesser_eICU',
-                    help="Directory for saved guesser model")
 parser.add_argument("--gamma",
                     type=float,
                     default=0.9,
@@ -87,11 +83,6 @@ parser.add_argument("--val_trials_wo_im",
                     type=int,
                     default=5,
                     help="Number of validation trials without improvement")
-parser.add_argument("--cost_budget",
-                    type=int,
-                    default=17,
-                    help="Number of validation trials without improvement")
-
 parser.add_argument("--device",
                     type=str,
                     default=device,

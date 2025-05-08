@@ -78,6 +78,10 @@ parser.add_argument("--reduced_dim",
                     type=int,
                     default=20,
                     help="Reduced dimension for text embedding")
+parser.add_argument("--save_dir",
+                    type=str,
+                    default='guesser_eICU',
+                    help="save path")
 FLAGS = parser.parse_args(args=[])
 
 
@@ -165,8 +169,8 @@ class MultimodalGuesser(nn.Module):
     def __init__(self):
         super(MultimodalGuesser, self).__init__()
         self.device = DEVICE
-        self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_time_Series()
-        # self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_text()
+        #self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_time_Series()
+        self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_text()
         # self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_only_text()
         # self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_time_series()
         # self.X, self.y, self.tests_number, self.map_test = pcafe_utils.load_mimic_no_text()
@@ -212,7 +216,7 @@ class MultimodalGuesser(nn.Module):
         self.optimizer = torch.optim.Adam(self.parameters(),
                                           weight_decay=FLAGS.weight_decay,
                                           lr=FLAGS.lr)
-        self.path_to_save = os.path.join(os.getcwd(), 'guesser_eICU')
+        self.path_to_save = os.path.join(os.getcwd(), FLAGS.save_dir)
         self.layer1 = self.layer1.to(self.device)
         self.layer2 = self.layer2.to(self.device)
         self.layer3 = self.layer3.to(self.device)
